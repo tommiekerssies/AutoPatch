@@ -1,14 +1,12 @@
-from pytorch_lightning import LightningModule
-from mmselfsup.models import build_algorithm
 from torch.optim import Adam
 from torchmetrics import Accuracy
 from torch.nn.functional import cross_entropy
+from app.lm.base_lm import BaseLM
 
 
-class BaseClsLM(LightningModule):
+class BaseClsLM(BaseLM):
   def __init__(self, **kwargs):
-    super().__init__()
-    self.save_hyperparameters()
+    super().__init__(**kwargs)
     
     self.train_acc = Accuracy()
     self.val_acc = Accuracy()
@@ -39,4 +37,4 @@ class BaseClsLM(LightningModule):
     return self.step(batch, self.val_acc, 'val_acc', 'val_loss')
   
   def configure_optimizers(self):
-    return Adam(self.parameters())
+    return Adam(self.parameters(), lr=self.hparams.lr)

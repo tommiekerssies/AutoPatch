@@ -21,6 +21,8 @@ class ResNetClsLM(BaseClsLM):
 
   @staticmethod
   def add_argparse_args(parent_parser):
+    parent_parser = super(ResNetClsLM, ResNetClsLM) \
+      .add_argparse_args(parent_parser)
     parser = parent_parser.add_argument_group("DynamicClassifierLM")
     parser.add_argument("--depth", type=int)
     parser.add_argument("--num_classes", type=int)

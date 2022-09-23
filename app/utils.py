@@ -1,4 +1,4 @@
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from os.path import join
@@ -65,7 +65,7 @@ def load_subnet_weights(supernet_cls, lm, ldm, resume_run_id,
         stem=dict(width=lm.model_cfg['backbone']['stem_width']),
         body=dict(width=lm.model_cfg['backbone']['body_width'],
                   depth=lm.model_cfg['backbone']['body_depth']))))
-  TrainerPL.from_argparse_args(kwargs, fast_dev_run=True) \
+  TrainerPL.from_argparse_args(Namespace(**kwargs), fast_dev_run=True) \
     .predict(supernet_lm, datamodule=ldm)
     
   return _load_state_dict_from_obj(lm, supernet_lm)

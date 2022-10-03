@@ -1,9 +1,7 @@
 from argparse import Namespace
 import inspect
-from math import ceil
 from pytorch_lightning import Trainer as TrainerPL
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 
 class Trainer(TrainerPL):
@@ -33,30 +31,13 @@ class Trainer(TrainerPL):
     
   def tune(self, lm, datamodule, devices, num_nodes,
            lr, batch_size, **kwargs):    
-    if not lr:
-      lm.hparams.lr = 1e-3
-    
     tune_trainer = TrainerPL.from_argparse_args(
       Namespace(**self.trainer_kwargs),
-      strategy=None, devices=[self.global_rank], num_nodes=1, 
-      auto_lr_find=False if lr else True,
-      auto_scale_batch_size=None if batch_size else 'binsearch')
+      strategy=None, devices=1, num_nodes=1, 
+      auto_lr_find=True,
+      auto_scale_batch_size='binsearch')
 
     tune_trainer.tune(lm, datamodule=datamodule)
-    
-    # Reduce batch size by 2% because the found batch size is too tight
-    datamodule.hparams.batch_size = \
-      ceil(datamodule.hparams.batch_size * 0.98)
-    
-    print(datamodule.hparams.batch_size)
-    # Scale learning rate by number of participating GPUs,
-    # based on linear scaling rule from http://arxiv.org/abs/1706.02677
-    lr_multiplier = 1
-    if devices:
-      lr_multiplier *= int(devices)
-    if num_nodes:
-      lr_multiplier *= int(num_nodes)
-    lm.hparams.lr *= lr_multiplier
         
   def add_argparse_args(*args, **kwargs):
     return TrainerPL.add_argparse_args(*args, **kwargs)

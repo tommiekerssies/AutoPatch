@@ -3,11 +3,10 @@ The specific purpose is SSL-NAS (see app.searcher), but the code is general and 
 Throughout the code, lm is an abbreviation for LightningModule and ldm is an abbreviation for LightningDataModule.
 
 Features:
-- Auto learning rate finder (PL doesn't support this with DDP, this project fixes that)
-- Auto batch size finder (PL doesn't support this with DDP, this project fixes that)
 - Logging of experiments through Weights & Biases
 - Easy resuming of experiments (using --resume_run)
 - Easy loading of pre-trained weights from any format (using --prefix_old and --prefix_new)
+- Auto learning rate and batch size finder
 
 Example slurm script to train a ResNet50 with MoCo v2 pretrained weights on 16 gpus (8 per node):
 ```bash
@@ -30,6 +29,8 @@ export NCCL_SOCKET_IFNAME=horovod
 srun python3 train_resnet_cifar100.py \
   --num_nodes 2 \
   --devices 8 \
+  --batch_size 3125 \
+  --lr 0.16 \
   --seed 0 \
   --num_classes 100 \
   --depth 50 \

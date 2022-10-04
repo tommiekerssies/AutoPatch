@@ -8,6 +8,9 @@ Features:
 - Easy loading of pre-trained weights from any format (using --prefix_old and --prefix_new)
 - Auto learning rate and batch size finder
 
+Create environment with:
+`conda env create -f env.yml`
+
 Example slurm script to train a ResNet50 with MoCo v2 pretrained weights on 16 gpus (8 per node):
 ```bash
 #!/bin/bash

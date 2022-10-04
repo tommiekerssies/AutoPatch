@@ -2,6 +2,7 @@ from torch.optim import Adam
 from torchmetrics import Accuracy
 from torch.nn.functional import cross_entropy
 from app.lm.base_lm import BaseLM
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class BaseClsLM(BaseLM):
@@ -37,4 +38,10 @@ class BaseClsLM(BaseLM):
     return self.step(batch, self.val_acc, 'val_acc', 'val_loss')
   
   def configure_optimizers(self):
-    return Adam(self.parameters(), lr=self.hparams.lr)
+    optimizer_kwargs = dict()
+    if self.hparams.lr:
+      optimizer_kwargs['lr'] = self.hparams.lr
+    optimizer = Adam(self.parameters(), **optimizer_kwargs)
+    lr_scheduler = dict(scheduler=ReduceLROnPlateau(optimizer),
+                        monitor='val_loss')
+    return dict(optimizer=optimizer, lr_scheduler=lr_scheduler)

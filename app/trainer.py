@@ -18,7 +18,7 @@ class Trainer(TrainerPL):
     valid_kwargs = inspect.signature(TrainerPL.__init__).parameters
     self.trainer_kwargs = {name: kwargs[name] for name
                       in valid_kwargs if name in kwargs}
-    
+
     self.trainer_kwargs.update(dict(
       strategy='ddp_find_unused_parameters_false',
       accelerator='auto', log_every_n_steps=1,
@@ -29,13 +29,15 @@ class Trainer(TrainerPL):
 
     super().__init__(**self.trainer_kwargs)
     
-  def tune(self, lm, datamodule, devices, num_nodes,
-           lr, batch_size, **kwargs):    
+  def tune(self, lm, datamodule, **kwargs):    
+    auto_lr_find = not kwargs['lr']
+    auto_scale_batch_size = not kwargs['batch_size']
+    
     tune_trainer = TrainerPL.from_argparse_args(
       Namespace(**self.trainer_kwargs),
       strategy=None, devices=1, num_nodes=1, 
-      auto_lr_find=True,
-      auto_scale_batch_size='binsearch')
+      auto_lr_find=auto_lr_find,
+      auto_scale_batch_size=auto_scale_batch_size)
 
     tune_trainer.tune(lm, datamodule=datamodule)
         

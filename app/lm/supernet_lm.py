@@ -48,7 +48,7 @@ class Distance(Metric):
 
 
 class SuperNetLM(BaseLM):
-  def __init__(self, **kwargs):
+  def __init__(self, dense_distance, **kwargs):
     # TODO make this generic such that it can be MoCo or DenseCL
     super().__init__(
         model_cfg=dict(
@@ -73,10 +73,11 @@ class SuperNetLM(BaseLM):
                 hid_channels=2048,
                 out_channels=128,
                 with_avg_pool=True),
-            head=dict(type='ContrastiveHead', temperature=0.2)),
-        **kwargs)
-
-    self.distance = Distance(self.hparams.dense_distance)
+            head=dict(type='ContrastiveHead', temperature=0.2)))
+    
+    self.save_hyperparameters()
+    
+    self.distance = Distance(dense_distance)
 
   def predict_step(self, batch, batch_idx):
     # TODO: add return?

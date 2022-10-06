@@ -10,6 +10,7 @@ from pytorch_lightning import Trainer as TrainerPL
 def add_global_args(parent_parser):
   parser = parent_parser.add_argument_group("Global")
   parser.add_argument("--seed", type=int)
+  parser.add_argument("--patience", type=int, default=10)
   parser.add_argument("--resume_run_id", type=str)
   parser.add_argument("--work_dir", type=str)
   parser.add_argument("--weights_file", type=str)

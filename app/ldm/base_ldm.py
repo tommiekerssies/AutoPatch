@@ -1,10 +1,14 @@
 from pytorch_lightning import LightningDataModule
+from torch import Generator
 
 
 class BaseLDM(LightningDataModule):
-  def __init__(self, num_workers, batch_size, **kwargs):
+  def __init__(self, num_workers, batch_size, seed, **kwargs):
     super().__init__()
-    self.save_hyperparameters()
+    self.dataloader_kwargs = dict(
+      batch_size=batch_size, 
+      num_workers=num_workers, pin_memory=True,
+      generator=Generator().manual_seed(seed))
     
   @staticmethod
   def add_argparse_args(parent_parser):

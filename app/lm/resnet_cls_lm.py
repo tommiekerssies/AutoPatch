@@ -1,18 +1,21 @@
 from app.lm.base_cls_lm import BaseClsLM
+from torchvision.models import resnet50
 
 
 class ResNetClsLM(BaseClsLM):
-  def __init__(self, **kwargs):
+  def __init__(self, depth, num_classes, **kwargs):
     super().__init__(model_cfg=dict(
       type='Classification',
       backbone=dict(
         type='ResNet',
-        depth=self.hparams.depth),
+        depth=depth),
       head=dict(
         type='ClsHead',
         with_avg_pool=True,
-        num_classes=self.hparams.num_classes)),
-      **kwargs)
+        num_classes=num_classes)),
+      )
+    
+    self.save_hyperparameters()
 
   @staticmethod
   def add_argparse_args(parent_parser):

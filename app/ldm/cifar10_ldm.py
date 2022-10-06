@@ -4,36 +4,33 @@ from torch import Generator
 from app.ldm.base_ldm import BaseLDM
 
 
-class CIFAR100LDM(BaseLDM):
+class CIFAR10LDM(BaseLDM):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
-    self.mean = [0.5070751592371323, 0.48654887331495095, 0.4409178433670343]
-    self.std = [0.2673342858792401, 0.2564384629170883, 0.27615047132568404]
+    self.mean = [0.4914, 0.4822, 0.4465]
+    self.std = [0.2023, 0.1994, 0.201]
 
   def prepare_data(self):
-    datasets.CIFAR100(root=self.hparams.work_dir, train=True, download=True)
-    datasets.CIFAR100(root=self.hparams.work_dir, train=False, download=True)
+    datasets.CIFAR10(root=self.hparams.work_dir, train=True, download=True)
+    datasets.CIFAR10(root=self.hparams.work_dir, train=False, download=True)
 
   def setup(self, stage):
     train_transform = transforms.Compose([
       transforms.RandomCrop(32, padding=4),
       transforms.RandomHorizontalFlip(),
-      transforms.RandomRotation(15),
       transforms.ToTensor(),
       transforms.Normalize(self.mean, self.std)
     ])
-    self.train = datasets.CIFAR100(root=self.hparams.work_dir,
+    self.train = datasets.CIFAR10(root=self.hparams.work_dir,
                                    transform=train_transform, 
                                    train=True)
     
     val_transform = transforms.Compose([
       transforms.ToTensor(),
-      transforms.Normalize(self.mean, self.std),
-    ])
-    self.val = datasets.CIFAR100(root=self.hparams.work_dir, 
+      transforms.Normalize(self.mean, self.std)])
+    self.val = datasets.CIFAR10(root=self.hparams.work_dir, 
                                  transform=val_transform,
                                  train=False)
-    return self
 
   def train_dataloader(self):
     return DataLoader(self.train, batch_size=self.hparams.batch_size, 

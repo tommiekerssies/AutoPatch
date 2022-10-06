@@ -33,6 +33,9 @@ class Trainer(TrainerPL):
     auto_lr_find = not kwargs['lr']
     auto_scale_batch_size = not kwargs['batch_size']
     
+    if auto_lr_find:
+      lm.hparams.lr = 1e-3
+    
     tune_trainer = TrainerPL.from_argparse_args(
       Namespace(**self.trainer_kwargs),
       strategy=None, devices=1, num_nodes=1, 

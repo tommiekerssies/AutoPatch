@@ -1,5 +1,6 @@
 from pytorch_lightning import LightningModule
 from mmselfsup.models import build_algorithm
+from app.lm.base_lm import BaseLM
 import lib.gaia.dynamic_moco
 import lib.gaia.dynamic_resnet
 import lib.gaia.dynamic_conv
@@ -46,39 +47,36 @@ class Distance(Metric):
     return self.distance / self.count
 
 
-class SuperNetLM(LightningModule):
+class SuperNetLM(BaseLM):
   def __init__(self, **kwargs):
-    super().__init__(**kwargs)
-    self.save_hyperparameters()
-    
-    self.distance = Distance(self.hparams.dense_distance)
-
     # TODO make this generic such that it can be MoCo or DenseCL
-    model_cfg = dict(
-        type='DynamicMOCO',
-        queue_len=65536,
-        feat_dim=128,
-        momentum=0.999,
-        backbone=dict(
-            type='DynamicResNet',
-            in_channels=3,
-            stem_width=64,
-            body_depth=[4, 6, 29, 4],
-            body_width=[80, 160, 320, 640],
-            num_stages=4,
-            out_indices=[3],  # 0: conv-1, x: stage-x
-            conv_cfg=dict(type='DynConv2d'),
-            norm_cfg=dict(type='DynBN', requires_grad=True),
-            style='pytorch',),
-        neck=dict(
-            type='DynamicNonLinearNeckV1',
-            in_channels=2560,
-            hid_channels=2048,
-            out_channels=128,
-            with_avg_pool=True),
-        head=dict(type='ContrastiveHead', temperature=0.2))
-    
-    self.model = build_algorithm(model_cfg)
+    super().__init__(
+        model_cfg=dict(
+            type='DynamicMOCO',
+            queue_len=65536,
+            feat_dim=128,
+            momentum=0.999,
+            backbone=dict(
+                type='DynamicResNet',
+                in_channels=3,
+                stem_width=64,
+                body_depth=[4, 6, 29, 4],
+                body_width=[80, 160, 320, 640],
+                num_stages=4,
+                out_indices=[3],  # 0: conv-1, x: stage-x
+                conv_cfg=dict(type='DynConv2d'),
+                norm_cfg=dict(type='DynBN', requires_grad=True),
+                style='pytorch',),
+            neck=dict(
+                type='DynamicNonLinearNeckV1',
+                in_channels=2560,
+                hid_channels=2048,
+                out_channels=128,
+                with_avg_pool=True),
+            head=dict(type='ContrastiveHead', temperature=0.2)),
+        **kwargs)
+
+    self.distance = Distance(self.hparams.dense_distance)
 
   def predict_step(self, batch, batch_idx):
     # TODO: add return?
@@ -103,6 +101,8 @@ class SuperNetLM(LightningModule):
 
   @staticmethod
   def add_argparse_args(parent_parser):
+    parent_parser = super(SuperNetLM, SuperNetLM) \
+        .add_argparse_args(parent_parser)
     parser = parent_parser.add_argument_group("SuperNetLM")
     parser.add_argument("--dense_distance", action='store_true')
     return parent_parser

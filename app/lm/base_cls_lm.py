@@ -5,7 +5,7 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 class BaseClsLM(BaseLM):
-  def __init__(self, model_cfg, **kwargs):
+  def __init__(self, model_cfg):
     super().__init__(model_cfg)
     self.train_acc = Accuracy()
     self.val_acc = Accuracy()
@@ -44,7 +44,8 @@ class BaseClsLM(BaseLM):
     scheduler = ReduceLROnPlateau(optimizer, mode='min', verbose=True)
     
     return dict(optimizer=optimizer, 
-                lr_scheduler=dict(scheduler=scheduler, monitor='val_loss'))
+                lr_scheduler=dict(scheduler=scheduler, 
+                                  monitor='val_loss'))
 
   @staticmethod
   def add_argparse_args(parent_parser):
@@ -53,5 +54,5 @@ class BaseClsLM(BaseLM):
     parser = parent_parser.add_argument_group("BaseClsLM")
     parser.add_argument("--num_classes", type=int)
     parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--weight_decay", type=float)
+    parser.add_argument("--weight_decay", type=float, default=0)
     return parent_parser

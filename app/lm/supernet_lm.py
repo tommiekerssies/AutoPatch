@@ -16,8 +16,9 @@ class Distance(Metric):
   higher_is_better = False
 
   def __init__(self, dense_distance):
+    super().__init__()
     self.dense_distance = dense_distance
-
+    
     self.add_state("distance", default=tensor(0.), dist_reduce_fx="sum")
     self.add_state("count", default=tensor(0), dist_reduce_fx="sum")
 
@@ -48,7 +49,7 @@ class Distance(Metric):
 
 
 class SuperNetLM(BaseLM):
-  def __init__(self, dense_distance, **kwargs):
+  def __init__(self, dense_distance=None, **kwargs):
     # TODO make this generic such that it can be MoCo or DenseCL
     super().__init__(
         model_cfg=dict(

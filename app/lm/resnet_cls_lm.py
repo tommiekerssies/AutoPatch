@@ -1,5 +1,4 @@
 from app.lm.base_cls_lm import BaseClsLM
-from torchvision.models import resnet50
 
 
 class ResNetClsLM(BaseClsLM):
@@ -12,8 +11,7 @@ class ResNetClsLM(BaseClsLM):
       head=dict(
         type='ClsHead',
         with_avg_pool=True,
-        num_classes=num_classes)),
-      )
+        num_classes=num_classes)))
     
     self.save_hyperparameters()
 

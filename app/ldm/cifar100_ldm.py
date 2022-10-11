@@ -29,6 +29,9 @@ class CIFAR100LDM(BaseLDM):
     self.val = CIFAR100(root=self.hparams.work_dir, 
                         transform=Compose(preprocessing),
                         train=False)
+    self.predict = CIFAR100(root=self.hparams.work_dir, 
+                            transform=Compose(preprocessing),
+                            train=True)
     return self
 
   def train_dataloader(self):

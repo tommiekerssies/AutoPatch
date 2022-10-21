@@ -8,11 +8,16 @@ import torch.utils.checkpoint as cp
 from torch.nn.modules.batchnorm import _BatchNorm
 
 # mm lib
-from mmcv.cnn import (build_plugin_layer, constant_init, kaiming_init,
-                      build_conv_layer, build_activation_layer)
+from mmcv.cnn import (
+    build_plugin_layer,
+    constant_init,
+    kaiming_init,
+    build_conv_layer,
+    build_activation_layer,
+)
 from mmcv.runner import load_checkpoint
-from mmselfsup.utils import get_root_logger
-from mmselfsup.models import BACKBONES
+from mmseg.utils import get_root_logger
+from mmseg.models.builder import BACKBONES
 
 # gaia lib
 from lib.gaia.dynamic_mixin import DynamicMixin
@@ -65,7 +70,8 @@ class DynamicResNet(nn.Module, DynamicMixin):
     Example:
         pass
     """
-    search_space = {'stem', 'body'}
+
+    search_space = {"stem", "body"}
 
     def init_state(self, stem=None, body=None, **kwargs):
         # reserved state
@@ -75,42 +81,35 @@ class DynamicResNet(nn.Module, DynamicMixin):
             self.body_state = body
 
         for k, v in kwargs.items():
-            setattr(self, f'{k}_state', v)
-
-    def state(self):
-        state = {
-            'stem': self.stem_state,
-            'body': self.body_state,
-        }
-        return state
+            setattr(self, f"{k}_state", v)
 
     def __init__(
-            self,
-            in_channels,
-            stem_width,
-            body_width,  # width of each stage
-            body_depth,  # depth of each stage
-            num_stages=4,
-            strides=(1, 2, 2, 2),
-            dilations=(1, 1, 1, 1),
-            out_indices=(0, 1, 2, 3),
-            style='pytorch',
-            deep_stem=False,
-            avg_down=False,
-            frozen_stages=-1,
-            frozen_layers=None,
-            conv_cfg=None,
-            norm_cfg=dict(type='DynSyncBN'),
-            act_cfg=dict(type='ReLU'),
-            norm_eval=False,
-            dcn=None,
-            stage_with_dcn=(False, False, False, False),
-            plugins=None,
-            with_cp=False,
-            calibrate_bn = False,
-            zero_init_residual=True):
+        self,
+        in_channels,
+        stem_width,  # width of the stem block
+        body_width,  # width of each stage
+        body_depth,  # depth of each stage
+        num_stages=4,
+        strides=(1, 2, 2, 2),
+        dilations=(1, 1, 1, 1),
+        out_indices=(0, 1, 2, 3),
+        style="pytorch",
+        deep_stem=False,
+        avg_down=False,
+        frozen_stages=-1,
+        frozen_layers=None,
+        conv_cfg=None,
+        norm_cfg=dict(type="DynSyncBN"),
+        act_cfg=dict(type="ReLU"),
+        norm_eval=False,
+        dcn=None,
+        stage_with_dcn=(False, False, False, False),
+        plugins=None,
+        with_cp=False,
+        zero_init_residual=True,
+        contract_dilation=False,  # add contract_dilation
+    ):
         super(DynamicResNet, self).__init__()
-        self.calibrate_bn = calibrate_bn
         self.body_depth = body_depth
         self.stem_width = stem_width
         self.body_width = body_width
@@ -133,6 +132,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
         self.norm_eval = norm_eval
         self.dcn = dcn
         self.stage_with_dcn = stage_with_dcn
+        self.contract_dilation = contract_dilation
         if dcn is not None:
             assert len(stage_with_dcn) == num_stages
         self.plugins = plugins
@@ -140,13 +140,13 @@ class DynamicResNet(nn.Module, DynamicMixin):
         # TODO: support DynamicBasicBlock
         self.block = DynamicBottleneck
         self.body_depth = body_depth[:num_stages]
-        self.inplanes = stem_width
 
-        self.init_state(stem={'width': stem_width},
-                        body={
-                            'depth': body_depth,
-                            'width': body_width
-                        })
+        # Fix the use of Resnetv1c
+        self.inplanes = stem_width[-1] if deep_stem else stem_width
+
+        self.init_state(
+            stem={"width": stem_width}, body={"depth": body_depth, "width": body_width}
+        )
 
         self._make_stem_layer(in_channels, stem_width)
 
@@ -160,21 +160,25 @@ class DynamicResNet(nn.Module, DynamicMixin):
             else:
                 stage_plugins = None
             planes = body_width[i]
-            res_layer = self.make_res_layer(block=self.block,
-                                            inplanes=self.inplanes,
-                                            planes=planes,
-                                            depth=num_blocks,
-                                            stride=stride,
-                                            dilation=dilation,
-                                            style=self.style,
-                                            avg_down=self.avg_down,
-                                            with_cp=with_cp,
-                                            conv_cfg=conv_cfg,
-                                            norm_cfg=norm_cfg,
-                                            dcn=dcn,
-                                            plugins=stage_plugins)
+            res_layer = self.make_res_layer(
+                block=self.block,
+                inplanes=self.inplanes,
+                planes=planes,
+                depth=num_blocks,
+                stride=stride,
+                dilation=dilation,
+                style=self.style,
+                avg_down=self.avg_down,
+                with_cp=with_cp,
+                conv_cfg=conv_cfg,
+                norm_cfg=norm_cfg,
+                dcn=dcn,
+                contract_dilation=contract_dilation,
+                plugins=stage_plugins,
+            )
             self.inplanes = planes * self.block.expansion
-            layer_name = f'layer{i + 1}'
+            layer_name = f"layer{i + 1}"
+
             self.add_module(layer_name, res_layer)
             self.res_layers.append(layer_name)
 
@@ -183,8 +187,9 @@ class DynamicResNet(nn.Module, DynamicMixin):
         # freeze selected layers in each stages
         self._freeze_layers()
 
-        self.feat_dim = self.block.expansion * body_width[0] * \
-            2**(len(self.body_depth) - 1)
+        self.feat_dim = (
+            self.block.expansion * body_width[0] * 2 ** (len(self.body_depth) - 1)
+        )
         self.active_feat_dim = self.feat_dim
 
     def make_stage_plugins(self, plugins, stage_idx):
@@ -241,7 +246,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
         stage_plugins = []
         for plugin in plugins:
             plugin = plugin.copy()
-            stages = plugin.pop('stages', None)
+            stages = plugin.pop("stages", None)
             assert stages is None or len(stages) == self.num_stages
             # whether to insert plugin into current stage
             if stages is None or stages[stage_idx]:
@@ -262,44 +267,53 @@ class DynamicResNet(nn.Module, DynamicMixin):
         if self.deep_stem:
             assert isinstance(stem_width, Sequence)
             self.stem = nn.Sequential(
-                build_conv_layer(self.conv_cfg,
-                                 in_channels,
-                                 stem_width[0],
-                                 kernel_size=3,
-                                 stride=2,
-                                 padding=1,
-                                 bias=False),
+                build_conv_layer(
+                    self.conv_cfg,
+                    in_channels,
+                    stem_width[0],
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    bias=False,
+                ),
                 build_norm_layer(self.norm_cfg, stem_width[0])[1],
                 nn.ReLU(inplace=True),
-                build_conv_layer(self.conv_cfg,
-                                 stem_width[0],
-                                 stem_width[1],
-                                 kernel_size=3,
-                                 stride=1,
-                                 padding=1,
-                                 bias=False),
+                build_conv_layer(
+                    self.conv_cfg,
+                    stem_width[0],
+                    stem_width[1],
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                ),
                 build_norm_layer(self.norm_cfg, stem_width[1])[1],
                 nn.ReLU(inplace=True),
-                build_conv_layer(self.conv_cfg,
-                                 stem_width[1],
-                                 stem_width[2],
-                                 kernel_size=3,
-                                 stride=1,
-                                 padding=1,
-                                 bias=False),
+                build_conv_layer(
+                    self.conv_cfg,
+                    stem_width[1],
+                    stem_width[2],
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                ),
                 build_norm_layer(self.norm_cfg, stem_width[2])[1],
-                nn.ReLU(inplace=True))
+                nn.ReLU(inplace=True),
+            )
         else:
-            self.conv1 = build_conv_layer(self.conv_cfg,
-                                          in_channels,
-                                          stem_width,
-                                          kernel_size=7,
-                                          stride=2,
-                                          padding=3,
-                                          bias=False)
-            self.norm1_name, norm1 = build_norm_layer(self.norm_cfg,
-                                                      stem_width,
-                                                      postfix=1)
+            self.conv1 = build_conv_layer(
+                self.conv_cfg,
+                in_channels,
+                stem_width,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
+            )
+            self.norm1_name, norm1 = build_norm_layer(
+                self.norm_cfg, stem_width, postfix=1
+            )
             self.add_module(self.norm1_name, norm1)
             self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -307,27 +321,23 @@ class DynamicResNet(nn.Module, DynamicMixin):
     def _freeze_stages(self):
         if self.frozen_stages >= 0:
             if self.deep_stem:
-                if not self.calibrate_bn:
-                    self.stem.eval()
+                self.stem.eval()
                 for param in self.stem.parameters():
                     param.requires_grad = False
             else:
-                if not self.calibrate_bn:
-                    self.norm1.eval()
+                self.norm1.eval()
                 for m in [self.conv1, self.norm1]:
                     for param in m.parameters():
                         param.requires_grad = False
 
         for i in range(1, self.frozen_stages + 1):
-            m = getattr(self, f'layer{i}')
-            if not self.calibrate_bn:
-                m.eval()
+            m = getattr(self, f"layer{i}")
+            m.eval()
             for param in m.parameters():
                 param.requires_grad = False
 
     def _freeze_layers(self):
-        """Freeze the first n layers in each stages
-        """
+        """Freeze the first n layers in each stages"""
         if self.frozen_layers is not None:
             for i, layer_name in enumerate(self.res_layers):
                 res_layer = getattr(self, layer_name)
@@ -335,8 +345,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
                 assert frozen_layer_num <= len(res_layer)
                 for j in range(frozen_layer_num):
                     m = res_layer[j]
-                    if not self.calibrate_bn:
-                        m.eval()
+                    m.eval()
                     for param in m.parameters():
                         param.requires_grad = False
 
@@ -359,8 +368,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
 
             if self.dcn is not None:
                 for m in self.modules():
-                    if isinstance(m, Bottleneck) and hasattr(
-                            m.conv2, 'conv_offset'):
+                    if isinstance(m, Bottleneck) and hasattr(m.conv2, "conv_offset"):
                         constant_init(m.conv2.conv_offset, 0)
 
             if self.zero_init_residual:
@@ -371,7 +379,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
                     #     constant_init(m.norm2, 0)
 
         else:
-            raise TypeError('pretrained must be a str or None')
+            raise TypeError("pretrained must be a str or None")
 
     def train(self, mode=True):
         """Convert the model into training mode while keep normalization layer
@@ -406,9 +414,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
     def manipulate_body(self, arch_meta):
         self.body_state = arch_meta
         # DL to LD
-        sliced_arch_meta = [
-            dict(zip(arch_meta, t)) for t in zip(*arch_meta.values())
-        ]
+        sliced_arch_meta = [dict(zip(arch_meta, t)) for t in zip(*arch_meta.values())]
         for i, layer_name in enumerate(self.res_layers):
             res_layer = getattr(self, layer_name)
             res_layer.manipulate_arch(sliced_arch_meta[i])

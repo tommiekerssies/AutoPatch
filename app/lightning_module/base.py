@@ -48,8 +48,9 @@ class Base(LightningModule):
             body_depth=self.hparams.body_depth,
             body_width=self.hparams.body_width,
             conv_cfg=dict(type="DynConv2d"),
-            dilations=(1, 1, 2, 2),
+            dilations=(1, 1, 2, 4),
             strides=(1, 2, 1, 1),
+            contract_dilation=True,
         )
 
         self.model = MMCV_MODELS.build(cfg=model_cfg)

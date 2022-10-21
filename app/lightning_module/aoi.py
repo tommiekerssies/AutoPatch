@@ -32,6 +32,7 @@ class AOI(Base):
                     in_channels=4 * self.hparams.body_width[-1],
                     channels=512,
                     num_classes=self.hparams.num_classes,
+                    dropout_ratio=0.1,
                 ),
             )
         )

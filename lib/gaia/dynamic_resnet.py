@@ -16,8 +16,8 @@ from mmcv.cnn import (
     build_activation_layer,
 )
 from mmcv.runner import load_checkpoint
-from mmseg.utils import get_root_logger
-from mmseg.models.builder import BACKBONES
+from mmselfsup.utils import get_root_logger
+from mmselfsup.models import BACKBONES
 
 # gaia lib
 from lib.gaia.dynamic_mixin import DynamicMixin

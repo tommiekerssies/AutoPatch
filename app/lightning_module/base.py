@@ -27,7 +27,7 @@ class Base(LightningModule):
 
     @staticmethod
     def add_argparse_args(parser):
-        parser.add_argument("--lr", type=float)
+        parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--warmup_steps", type=int, default=0)
         parser.add_argument("--stem_width", type=int)
         parser.add_argument("--body_width", nargs="+", type=int)
@@ -37,6 +37,7 @@ class Base(LightningModule):
         super().__init__()
         self.hparams: Any
         self.ckpt_path: Union[str, None] = None
+        self.log_kwargs = dict(on_step=False, on_epoch=True, sync_dist=True)
 
         if "backbone" not in model_cfg:
             model_cfg["backbone"] = {}

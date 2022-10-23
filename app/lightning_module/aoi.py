@@ -29,10 +29,10 @@ class AOI(Base):
                 type="mmseg.EncoderDecoder",
                 decode_head=dict(
                     type="FCNHead",
+                    num_convs=1,
                     in_channels=4 * self.hparams.body_width[-1],
                     channels=512,
                     num_classes=self.hparams.num_classes,
-                    dropout_ratio=0.1,
                 ),
             )
         )
@@ -121,57 +121,25 @@ class AOI(Base):
             mode="bilinear",
         )
 
-    def step(self, batch, metrics, mean_metric, prefix, on_step, on_epoch):
+    def step(self, batch, metrics, mean_metric, prefix):
         out = self(batch["image"].float())
 
         for i in range(self.hparams.num_classes):
             metrics[i](out[:, i, :, :], batch["masks"][i], batch["ignore_mask"])
-            self.log(
-                f"{prefix}_IoU_{i}",
-                metrics[i],
-                on_step=on_step,
-                on_epoch=on_epoch,
-                sync_dist=True,
-            )
+            self.log(f"{prefix}_IoU_{i}", metrics[i], **self.log_kwargs)
 
-        self.log(
-            f"{prefix}_mIoU",
-            mean_metric,
-            on_step=on_step,
-            on_epoch=on_epoch,
-            sync_dist=True,
-        )
+        self.log(f"{prefix}_mIoU", mean_metric, **self.log_kwargs)
 
         loss = self._get_loss(out, batch)
-        self.log(
-            f"{prefix}_loss",
-            loss,
-            on_step=on_step,
-            on_epoch=on_epoch,
-            sync_dist=True,
-        )
+        self.log(f"{prefix}_loss", loss, **self.log_kwargs)
 
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.step(
-            batch,
-            self.train_IoUs,
-            self.train_mIoU,
-            "train",
-            on_epoch=True,
-            on_step=True,
-        )
+        return self.step(batch, self.train_IoUs, self.train_mIoU, "train")
 
     def validation_step(self, batch, batch_idx):
-        return self.step(
-            batch,
-            self.val_IoUs,
-            self.val_mIoU,
-            "val",
-            on_epoch=True,
-            on_step=False,
-        )
+        return self.step(batch, self.val_IoUs, self.val_mIoU, "val")
 
     def _get_loss(
         self, out, batch

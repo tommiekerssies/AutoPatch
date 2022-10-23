@@ -6,7 +6,7 @@ from torch import Generator
 class Base(LightningDataModule):
     @staticmethod
     def add_argparse_args(parser):
-        parser.add_argument("--num_workers", type=int, default=1)
+        parser.add_argument("--num_workers", type=int, default=2)
         parser.add_argument("--batch_size", type=int)
 
     def __init__(self):

@@ -18,7 +18,7 @@ class AOI(Base):
     def add_argparse_args(parser):
         Base.add_argparse_args(parser)
         parser.add_argument("--crop_size", type=int)
-        parser.add_argument("--use_augmentations", action="store_true")
+        parser.add_argument("--disable_augmentations", action="store_true")
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
@@ -33,7 +33,7 @@ class AOI(Base):
                     self.hparams.crop_size, self.hparams.crop_size
                 ),
             )
-        if self.hparams.use_augmentations:
+        if not self.hparams.disable_augmentations:
             augmentations += [
                 HorizontalFlip(),
                 VerticalFlip(),

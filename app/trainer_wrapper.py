@@ -81,7 +81,7 @@ class TrainerWrapper(Trainer):
 
     def fit(self, lm, ldm):
         self.logger.watch(lm)  # type: ignore
-        lm.hparams.lr *= self.num_devices * self.num_nodes
+        # lm.hparams.lr *= self.num_devices * self.num_nodes
         super().fit(lm, datamodule=ldm, ckpt_path=lm.ckpt_path)
 
     def search(
@@ -136,6 +136,5 @@ class TrainerWrapper(Trainer):
             auto_lr_find=auto_lr_find,
             auto_scale_batch_size=auto_scale_batch_size,
         )
-        print(tune_trainer.strategy)
 
         tune_trainer.tune(lm, datamodule=ldm)

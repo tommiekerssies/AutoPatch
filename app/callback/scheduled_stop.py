@@ -7,6 +7,7 @@ class ScheduledStopCallback(Callback):
         self.stop_time = None
         if stop_time:
             self.stop_time = datetime.strptime(stop_time, "%Y-%m-%d %H:%M:%S")
+            print(f"Scheduled stop at: {self.stop_time}.")
 
     def on_train_batch_end(self, trainer, *args, **kwargs):
         self.stop_if_time_reached(trainer)

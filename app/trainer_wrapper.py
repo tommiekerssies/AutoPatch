@@ -17,11 +17,14 @@ class TrainerWrapper(Trainer):
     def add_argparse_args(parser):
         Trainer.add_argparse_args(parser)
         parser.add_argument("--stop_time", type=str)
+        parser.add_argument("--patience", type=int)
+        parser.add_argument("--project_name", type=str)
+        parser.add_argument("--monitor", type=str, default="val_loss")
+        parser.add_argument("--monitor_mode", type=str, default="min")
+
         parser.add_argument("--model_space_file", type=str)
         parser.add_argument("--min_gflops", type=float)
         parser.add_argument("--max_gflops", type=float)
-        parser.add_argument("--patience", type=int, default=15)
-        parser.add_argument("--project_name", type=str)
 
     def __init__(
         self,
@@ -32,23 +35,32 @@ class TrainerWrapper(Trainer):
         patience,
         stop_time,
         max_epochs,
+        monitor,
+        monitor_mode,
         **kwargs,
     ):
         seed_everything(seed, workers=True)
 
         callbacks = [
             ModelCheckpoint(
-                monitor="val_loss",
-                mode="min",
+                monitor=monitor,
+                mode=monitor_mode,
                 save_last=True,
-                filename=f"{{epoch}}-{{val_loss:.4f}}",
+                filename=f"{{epoch}}-{{{monitor}}}",
                 verbose=True,
-            ),
-            EarlyStopping(
-                monitor="val_loss", mode="min", patience=patience + 2, verbose=True
             ),
             ScheduledStopCallback(stop_time),
         ]
+
+        if patience:
+            callbacks.append(
+                EarlyStopping(
+                    monitor=monitor,
+                    mode=monitor_mode,
+                    patience=patience,
+                    verbose=True,
+                )
+            )
 
         # we only want to pass in valid Trainer args,
         # the rest may be user specific
@@ -80,7 +92,8 @@ class TrainerWrapper(Trainer):
         super().__init__(**self.trainer_kwargs)
 
     def fit(self, lm, ldm):
-        self.logger.watch(lm)  # type: ignore
+        if self.logger:
+            self.logger.watch(lm)  # type: ignore
         # lm.hparams.lr *= self.num_devices * self.num_nodes
         super().fit(lm, datamodule=ldm, ckpt_path=lm.ckpt_path)
 

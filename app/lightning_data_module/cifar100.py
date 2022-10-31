@@ -13,7 +13,7 @@ from torchvision.transforms import (
 class CIFAR100(Base):
     def __init__(self, **kwargs):
         self.save_hyperparameters()
-        super().__init__()
+        super().__init__(**kwargs)
 
     def prepare_data(self):
         CIFAR100Dataset(root=self.hparams.work_dir, train=True, download=True)

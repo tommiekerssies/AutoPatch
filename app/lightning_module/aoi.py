@@ -29,9 +29,10 @@ class AOI(Base):
                 type="mmseg.EncoderDecoder",
                 decode_head=dict(
                     type="FCNHead",
-                    num_convs=1,
+                    num_convs=0,
+                    concat_input=False,
+                    channels=4 * self.hparams.body_width[-1],
                     in_channels=4 * self.hparams.body_width[-1],
-                    channels=512,
                     num_classes=self.hparams.num_classes,
                 ),
             )
@@ -51,6 +52,8 @@ class AOI(Base):
         self.val_mIoU = MeanMetric(self.val_IoUs)
 
     def load_weights_from_supernet(self, ldm):
+        # TODO: remove requirement of ldm
+
         supernet_lm = SuperNet.create(
             resume_run_id=self.hparams.supernet_run_id, **self.hparams
         )
@@ -61,14 +64,14 @@ class AOI(Base):
         supernet_lm.model.manipulate_arch(
             dict(
                 encoder_q=dict(
-                    stem=dict(width=self.stem_width),  # type: ignore
+                    stem=dict(width=self.hparams.stem_width),
                     body=dict(
-                        width=self.body_width,  # type: ignore
-                        depth=self.body_depth,
+                        width=self.hparams.body_width,
+                        depth=self.hparams.body_depth,
                     ),
                 )
             )
-        )  # type: ignore
+        )
 
         # to prevent error when starting training later set this env
         # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
@@ -104,11 +107,9 @@ class AOI(Base):
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.hparams.lr)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", verbose=True)
 
         return dict(
             optimizer=optimizer,
-            lr_scheduler=dict(scheduler=scheduler, monitor="val_loss"),
         )
 
     def forward(self, img):

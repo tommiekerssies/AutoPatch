@@ -6,17 +6,19 @@ from torch import Generator
 class Base(LightningDataModule):
     @staticmethod
     def add_argparse_args(parser):
-        parser.add_argument("--num_workers", type=int, default=2)
+        parser.add_argument("--num_workers", type=int)
         parser.add_argument("--batch_size", type=int)
 
-    def __init__(self):
+    def __init__(self, pin_memory=True, **kwargs):
         super().__init__()
         self.hparams: Any
+        self.pin_memory = pin_memory
 
     @property
     def dataloader_kwargs(self):
         return dict(
             num_workers=self.hparams.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             generator=Generator().manual_seed(self.hparams.seed),
+            persistent_workers=True,
         )

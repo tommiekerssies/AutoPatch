@@ -9,10 +9,10 @@ from mmcv.cnn import MODELS as MMCV_MODELS
 
 class Base(LightningModule):
     @classmethod
-    def create(cls, ldm, resume_run_id, work_dir, project_name, **kwargs):
+    def create(cls, resume_run_id, work_dir, project_name=None, ldm=None, **kwargs):
         ckpt_path = None
 
-        if resume_run_id:
+        if resume_run_id and project_name:
             ckpt_path = join(
                 work_dir, project_name, resume_run_id, "checkpoints", "last.ckpt"
             )
@@ -28,7 +28,6 @@ class Base(LightningModule):
     @staticmethod
     def add_argparse_args(parser):
         parser.add_argument("--lr", type=float, default=1e-3)
-        parser.add_argument("--warmup_steps", type=int, default=0)
         parser.add_argument("--stem_width", type=int)
         parser.add_argument("--body_width", nargs="+", type=int)
         parser.add_argument("--body_depth", nargs="+", type=int)
@@ -42,39 +41,22 @@ class Base(LightningModule):
         if "backbone" not in model_cfg:
             model_cfg["backbone"] = {}
 
+        num_stages = len(self.hparams.body_depth)
+        dilations = (1, 1, 1, 1)
+        strides = (1, 2, 2, 2)
+
         model_cfg["backbone"] |= dict(
             type="mmselfsup.DynamicResNet",
+            conv_cfg=dict(type="DynConv2d"),
+            contract_dilation=True,
             in_channels=3,
             stem_width=self.hparams.stem_width,
             body_depth=self.hparams.body_depth,
             body_width=self.hparams.body_width,
-            conv_cfg=dict(type="DynConv2d"),
-            dilations=(1, 1, 2, 4),
-            strides=(1, 2, 1, 1),
-            contract_dilation=True,
+            num_stages=num_stages,
+            dilations=dilations[:num_stages],
+            strides=strides[:num_stages],
+            out_indices=[num_stages - 1],
         )
 
         self.model = MMCV_MODELS.build(cfg=model_cfg)
-
-    def optimizer_step(
-        self,
-        epoch,
-        batch_idx,
-        optimizer,
-        optimizer_idx,
-        optimizer_closure,
-        on_tpu=False,
-        using_native_amp=False,
-        using_lbfgs=False,
-    ):
-        optimizer.step(closure=optimizer_closure)
-
-        # learning rate warm-up
-        if self.trainer.global_step < self.hparams.warmup_steps:
-            lr_scale = float(self.trainer.global_step + 1) / self.hparams.warmup_steps
-            for i, pg in enumerate(optimizer.param_groups):  # type: ignore
-                pg["lr"] = lr_scale * self.hparams.lr
-                print(
-                    f"Step {self.trainer.global_step}: increasing learning rate"
-                    f" of group {i} to {pg['lr']}."
-                )

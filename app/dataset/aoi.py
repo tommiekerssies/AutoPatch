@@ -22,20 +22,23 @@ class AOI(Dataset):
         return len(self.imgs)
 
     def __getitem__(self, idx: int):
-        imgs = cv2.imread(self.imgs[idx])
-        imgs = cv2.cvtColor(imgs, cv2.COLOR_BGR2RGB)
+        img = cv2.imread(self.imgs[idx])
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         mask = cv2.imread(self.masks[idx])
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         masks = [mask.copy(), mask.copy(), mask.copy()]
 
-        sample = self.transform(image=imgs, masks=masks, ignore_mask=mask.copy())
+        sample = self.transform(image=img, masks=masks, ignore_mask=mask.copy())
 
         # TODO: do this based on number of classes and don't hardcode
         self.make_mask_binary(sample["masks"][0], [1, 3, 5, 7])
         self.make_mask_binary(sample["masks"][1], [2, 3, 6, 7])
         self.make_mask_binary(sample["masks"][2], [4, 5, 6, 7])
         self.make_mask_binary(sample["ignore_mask"], [254])
+        
+        sample["img_path"] = self.imgs[idx]
+        sample["mask_path"] = self.masks[idx]
 
         return sample
 

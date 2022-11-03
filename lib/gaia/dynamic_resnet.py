@@ -22,7 +22,7 @@ from mmselfsup.models import BACKBONES
 # gaia lib
 from lib.gaia.dynamic_mixin import DynamicMixin
 from lib.gaia.norm import build_norm_layer
-from lib.gaia.dynamic_res_blocks import DynamicBottleneck
+from lib.gaia.dynamic_res_blocks import DynamicBasicBlock, DynamicBottleneck
 
 # local lib
 from lib.gaia.dynamic_res_layer import DynamicResLayer
@@ -137,8 +137,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
             assert len(stage_with_dcn) == num_stages
         self.plugins = plugins
         self.zero_init_residual = zero_init_residual
-        # TODO: support DynamicBasicBlock
-        self.block = DynamicBottleneck
+        self.block = DynamicBasicBlock
         self.body_depth = body_depth[:num_stages]
 
         # Fix the use of Resnetv1c

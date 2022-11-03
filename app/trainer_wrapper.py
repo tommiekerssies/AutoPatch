@@ -1,9 +1,11 @@
 from argparse import Namespace
 import inspect
+from os import environ
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 import wandb
 from app.callback.scheduled_stop import ScheduledStopCallback
+from app.lightning_module.supernet import SuperNet
 from lib.gaia.base_rule import SAMPLE_RULES
 import lib.gaia.eval_rule as eval_rule
 from mmcv.utils import build_from_cfg
@@ -19,17 +21,14 @@ class TrainerWrapper(Trainer):
         parser.add_argument("--stop_time", type=str)
         parser.add_argument("--patience", type=int)
         parser.add_argument("--project_name", type=str)
-        parser.add_argument("--monitor", type=str, default="val_loss")
-        parser.add_argument("--monitor_mode", type=str, default="min")
-
-        parser.add_argument("--model_space_file", type=str)
-        parser.add_argument("--min_gflops", type=float)
+        parser.add_argument("--sync_bn", action="store_true")
         parser.add_argument("--max_gflops", type=float)
 
     def __init__(
         self,
         seed,
         resume_run_id,
+        supernet_run_id,
         project_name,
         work_dir,
         patience,
@@ -37,8 +36,13 @@ class TrainerWrapper(Trainer):
         max_epochs,
         monitor,
         monitor_mode,
+        sync_bn,
         **kwargs,
     ):
+        self.resume_run_id = resume_run_id
+        self.supernet_run_id = supernet_run_id
+        self.work_dir = work_dir
+
         seed_everything(seed, workers=True)
 
         callbacks = [
@@ -80,6 +84,7 @@ class TrainerWrapper(Trainer):
             )
 
         self.trainer_kwargs |= dict(
+            precision=16,
             strategy="ddp_find_unused_parameters_false",
             accelerator="auto",
             log_every_n_steps=1,
@@ -87,25 +92,31 @@ class TrainerWrapper(Trainer):
             callbacks=callbacks,
             max_epochs=max_epochs or -1,
             logger=logger,
+            benchmark=True,
+            sync_batchnorm=sync_bn,
         )
 
         super().__init__(**self.trainer_kwargs)
 
     def fit(self, lm, ldm):
+        if not self.resume_run_id:
+            if self.supernet_run_id:
+                self.load_weights_from_supernet(lm, ldm)
+            else:
+                lm.init_weight()
+
         if self.logger:
             self.logger.watch(lm)  # type: ignore
-        # lm.hparams.lr *= self.num_devices * self.num_nodes
+
         super().fit(lm, datamodule=ldm, ckpt_path=lm.ckpt_path)
 
-    def search(
-        self, lm, ldm, work_dir, model_space_file, min_gflops, max_gflops, **kwargs
-    ):
+    # TODO: move this search code closer to supernet, or to a seperate class.
+    def search(self, lm, ldm, work_dir, model_space_file, max_gflops, **kwargs):
         model_space = ModelSpaceManager.load(join(work_dir, model_space_file))
         model_sampling_rule = build_from_cfg(
             dict(
                 type="eval",
-                func_str=f"lambda x: x['overhead.flops'] >= {min_gflops * 1e9} "
-                + f"and x['overhead.flops'] < {max_gflops * 1e9}",
+                func_str=f"lambda x: x['overhead.flops'] < {max_gflops * 1e9}",
             ),
             SAMPLE_RULES,
         )
@@ -151,3 +162,34 @@ class TrainerWrapper(Trainer):
         )
 
         tune_trainer.tune(lm, datamodule=ldm)
+
+    def load_weights_from_supernet(self, lm, ldm):
+        # to prevent error when starting training later set this env
+        # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+        environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+        # create the supernet we want to extract a subnet from
+        supernet_lm = SuperNet.create(
+            resume_run_id=self.supernet_run_id, work_dir=self.work_dir
+        )
+
+        # Doing a forward pass with supernet in deploy mode should
+        # remove unused layers and channels from its state dict,
+        # resulting in only the subnet weights.
+        supernet_lm.model.deploy()
+        supernet_lm.model.manipulate_arch(
+            dict(
+                encoder_q=dict(
+                    stem=dict(width=lm.model_cfg["backbone"]["stem_width"]),
+                    body=dict(
+                        width=lm.model_cfg["backbone"]["body_width"],
+                        depth=lm.model_cfg["backbone"]["body_depth"],
+                    ),
+                )
+            )
+        )
+        Trainer(strategy="ddp", accelerator="auto", fast_dev_run=True).predict(
+            supernet_lm, ldm
+        )
+
+        return lm.load_state_dict_verbose(supernet_lm.state_dict())

@@ -10,6 +10,9 @@ class AOI(Dataset):
         self.masks = []
         self.transform = transform
 
+        # TODO: make the following more flexible
+        self.img_size = 2048
+
         for img in os.listdir(os.path.join(dataset_split_path, "img")):
             self.imgs.append(os.path.join(dataset_split_path, "img", img))
             self.masks.append(
@@ -36,7 +39,7 @@ class AOI(Dataset):
         self.make_mask_binary(sample["masks"][1], [2, 3, 6, 7])
         self.make_mask_binary(sample["masks"][2], [4, 5, 6, 7])
         self.make_mask_binary(sample["ignore_mask"], [254])
-        
+
         sample["img_path"] = self.imgs[idx]
         sample["mask_path"] = self.masks[idx]
 

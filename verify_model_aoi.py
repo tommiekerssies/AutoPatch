@@ -4,29 +4,30 @@ from statistics import mean, stdev
 from pytorch_lightning import seed_everything
 import wandb
 import torch
-from app.lightning_module.aoi import AOI as AOI_LM
-from app.lightning_data_module.aoi import AOI as AOI_LDM
+from app.lightning_module.multi_label_sem_seg.fcn import FCN
+from app.lightning_data_module.aoi import AOI
 import matplotlib.pyplot as plt
 
 
-torch.cuda.set_device("cuda:0")
+torch.cuda.set_device("cuda:4")
 torch.cuda.empty_cache()
 seed = 0
 seed_everything(seed, workers=True)
 wandb.init(mode="disabled")
 
-ldm = AOI_LDM(
+ldm = AOI(
     work_dir="/dataB1/tommie_kerssies/",
     seed=seed,
+    num_workers=0,
     batch_size=1,
-    num_workers=2,
-    crop_size=1024,
+    crop_size=256,
     augment=False,
     val_batch_size=1,
+    scale_factor=8.0,
 ).setup()
 
-model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/16njzepq/checkpoints/epoch=146-val_mIoU=0.8515074849128723.ckpt"
-model = AOI_LM.load_from_checkpoint(model_path)
+model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/133mlesc/checkpoints/last.ckpt"
+model = FCN.load_from_checkpoint(model_path)
 # model = AOI_LM(
 #     stem_width=32,
 #     body_width=[32, 64, 128, 256],
@@ -34,7 +35,7 @@ model = AOI_LM.load_from_checkpoint(model_path)
 #     num_classes=3,
 #     supernet_run_id=None,
 # )
-model = model.cuda()
+# model = model.cuda()
 
 
 def visualize(figsize=(40, 10), **images):
@@ -50,21 +51,20 @@ def visualize(figsize=(40, 10), **images):
     plt.show()
 
 
-for batch in islice(ldm.train_dataloader(), 5, 6):
-    img, mask, ignore_mask = (
-        batch["image"].cuda(),
+for batch in islice(ldm.train_dataloader(), 11, 12):
+    img, masks, ignore_mask = (
+        batch["image"],
         batch["masks"],
         batch["ignore_mask"],
     )
     model = model.eval()
-    x = model.model.extract_feat(img.float())
-    out = model.model.decode_head(x).detach()
-    # out = model(img.float()).detach()
-    masks = torch.stack(mask).permute(1, 0, 2, 3)
+    out_raw = model.model.decode_head(model.model.extract_feat(img.float()))
+    out, _ = model(batch)
     visualize(
         img=img[0].detach().permute(1, 2, 0).cpu(),
         # ignore_mask=ignore_mask[0].detach().cpu(),
-        mask=masks[0].detach().float().permute(1, 2, 0).cpu(),
+        mask=masks[0][0].detach().float().cpu(),
+        out_raw=out_raw[0].detach().sigmoid().permute(1, 2, 0).cpu(),
         out=out[0].detach().sigmoid().permute(1, 2, 0).cpu(),
     )
 

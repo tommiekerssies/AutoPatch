@@ -8,6 +8,7 @@ import torch.utils.checkpoint as cp
 from torch.nn.modules.batchnorm import _BatchNorm
 
 # mm lib
+from mmcv.runner import BaseModule
 from mmcv.cnn import (
     build_plugin_layer,
     constant_init,
@@ -29,7 +30,7 @@ from lib.gaia.dynamic_res_layer import DynamicResLayer
 
 
 @BACKBONES.register_module()
-class DynamicResNet(nn.Module, DynamicMixin):
+class DynamicResNet(BaseModule, DynamicMixin):
     """DynamicResNet backbone.
 
     Args:
@@ -108,6 +109,7 @@ class DynamicResNet(nn.Module, DynamicMixin):
         with_cp=False,
         zero_init_residual=True,
         contract_dilation=False,  # add contract_dilation
+        init_cfg=None,
     ):
         super(DynamicResNet, self).__init__()
         self.body_depth = body_depth

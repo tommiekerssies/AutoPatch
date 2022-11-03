@@ -19,7 +19,6 @@ class FCN(Base):
         )
         self.model_cfg = dict(
             type="mmseg.EncoderDecoder",
-            init_cfg=dict(type="Pretrained", checkpoint="open-mmlab://resnet18v1c"),
             decode_head=dict(
                 in_channels=self.hparams.body_width[-1],
                 channels=self.hparams.body_width[-1],

@@ -10,7 +10,6 @@ class ArgWrapper(ArgumentParser):
 
     def _add_global_args(self):
         self.add_argument("--seed", type=int, default=0)
-        self.add_argument("--resume_run_id", type=str)
         self.add_argument("--work_dir", type=str, default="/dataB1/tommie_kerssies")
 
     def parse_kwargs(self) -> dict:

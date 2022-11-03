@@ -9,7 +9,7 @@ from app.lightning_data_module.aoi import AOI
 import matplotlib.pyplot as plt
 
 
-torch.cuda.set_device("cuda:4")
+torch.cuda.set_device("cuda:0")
 torch.cuda.empty_cache()
 seed = 0
 seed_everything(seed, workers=True)
@@ -26,7 +26,7 @@ ldm = AOI(
     scale_factor=8.0,
 ).setup()
 
-model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/133mlesc/checkpoints/last.ckpt"
+model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/133mlesc/checkpoints/epoch=728-val_mIoU=0.8640275597572327.ckpt"
 model = FCN.load_from_checkpoint(model_path)
 # model = AOI_LM(
 #     stem_width=32,
@@ -51,7 +51,7 @@ def visualize(figsize=(40, 10), **images):
     plt.show()
 
 
-for batch in islice(ldm.train_dataloader(), 11, 12):
+for batch in islice(ldm.val_dataloader(), 0, 5):
     img, masks, ignore_mask = (
         batch["image"],
         batch["masks"],

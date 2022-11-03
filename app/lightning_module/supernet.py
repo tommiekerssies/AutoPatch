@@ -10,7 +10,6 @@ class SuperNet(Base):
     def add_argparse_args(parser):
         Base.add_argparse_args(parser)
         parser.add_argument("--dense_distance", action="store_true")
-        parser.add_argument("--model_space_file", type=str)
 
     def __init__(self, dense_distance=None, **kwargs):
         self.save_hyperparameters()
@@ -47,4 +46,5 @@ class SuperNet(Base):
         self.distance.compute()
 
     def forward(self, img):
+        # TODO: do forward on batch to be consistent with other lm's.
         return self.model(img)

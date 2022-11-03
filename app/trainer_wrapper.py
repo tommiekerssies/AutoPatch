@@ -18,11 +18,14 @@ class TrainerWrapper(Trainer):
     @staticmethod
     def add_argparse_args(parser):
         Trainer.add_argparse_args(parser)
+        parser.add_argument("--resume_run_id", type=str)
         parser.add_argument("--stop_time", type=str)
         parser.add_argument("--patience", type=int)
         parser.add_argument("--project_name", type=str)
         parser.add_argument("--sync_bn", action="store_true")
         parser.add_argument("--max_gflops", type=float)
+        parser.add_argument("--supernet_run_id", type=str)
+        parser.add_argument("--model_space_file", type=str)
 
     def __init__(
         self,
@@ -37,11 +40,15 @@ class TrainerWrapper(Trainer):
         monitor,
         monitor_mode,
         sync_bn,
+        model_space_file,
+        max_gflops,
         **kwargs,
     ):
         self.resume_run_id = resume_run_id
         self.supernet_run_id = supernet_run_id
         self.work_dir = work_dir
+        self.model_space_file = model_space_file
+        self.max_gflops = max_gflops
 
         seed_everything(seed, workers=True)
 
@@ -99,24 +106,30 @@ class TrainerWrapper(Trainer):
         super().__init__(**self.trainer_kwargs)
 
     def fit(self, lm, ldm):
-        if not self.resume_run_id:
-            if self.supernet_run_id:
-                self.load_weights_from_supernet(lm, ldm)
-            else:
-                lm.init_weight()
+        if self.supernet_run_id and not self.resume_run_id:
+            self.load_weights_from_supernet(lm, ldm)
 
         if self.logger:
             self.logger.watch(lm)  # type: ignore
 
         super().fit(lm, datamodule=ldm, ckpt_path=lm.ckpt_path)
 
-    # TODO: move this search code closer to supernet, or to a seperate class.
-    def search(self, lm, ldm, work_dir, model_space_file, max_gflops, **kwargs):
-        model_space = ModelSpaceManager.load(join(work_dir, model_space_file))
+    def search(self, ldm):
+        # TODO: move this search code closer to supernet, or to a seperate class.
+        # TODO: allow resuming supernet searching.
+        if self.supernet_run_id is None:
+            raise ValueError("supernet_run_id must be provided for searching.")
+
+        # create the supernet we want to extract a subnet from
+        supernet_lm = SuperNet.create(
+            resume_run_id=self.supernet_run_id, work_dir=self.work_dir
+        )
+
+        model_space = ModelSpaceManager.load(join(self.work_dir, self.model_space_file))
         model_sampling_rule = build_from_cfg(
             dict(
                 type="eval",
-                func_str=f"lambda x: x['overhead.flops'] < {max_gflops * 1e9}",
+                func_str=f"lambda x: x['overhead.flops'] < {self.max_gflops * 1e9}",
             ),
             SAMPLE_RULES,
         )
@@ -128,9 +141,9 @@ class TrainerWrapper(Trainer):
         for subnet in subnet_candidates:
             if "encoder_k" in subnet["arch"]:
                 subnet["arch"].pop("encoder_k")
-            lm.model.manipulate_arch(subnet["arch"])
-            self.predict(lm, ldm)
-            distance = lm.distance.compute()
+            supernet_lm.model.manipulate_arch(subnet["arch"])
+            self.predict(supernet_lm, ldm)
+            distance = supernet_lm.distance.compute()
 
             self.logger.experiment.log(dict(subnet=subnet, distance=distance))  # type: ignore
             if best_distance is None or distance < best_distance:

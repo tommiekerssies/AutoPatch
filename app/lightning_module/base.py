@@ -15,14 +15,16 @@ class Base(LightningModule):
     def create(cls, resume_run_id, work_dir, project_name=None, **kwargs):
         ckpt_path = None
 
-        if resume_run_id and project_name:
+        if resume_run_id:
+            if not project_name:
+                raise ValueError("Must provide project name to resume run.")
             ckpt_path = join(
                 work_dir, project_name, resume_run_id, "checkpoints", "last.ckpt"
             )
             lm = cls.load_from_checkpoint(ckpt_path, **kwargs)
 
         else:
-            lm = cls(resume_run_id=resume_run_id, work_dir=work_dir, **kwargs)  # type: ignore
+            lm = cls(work_dir=work_dir, resume_run_id=None, **kwargs)  # type: ignore
 
         lm.ckpt_path = ckpt_path
 
@@ -36,7 +38,9 @@ class Base(LightningModule):
             "--body_width", nargs="+", type=int, default=[64, 128, 256, 512]
         )
         parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2, 2, 2])
-        parser.add_argument("--supernet_run_id", type=str)
+        parser.add_argument(
+            "--mm_weights_file", type=str, default="open-mmlab://resnet18_v1c"
+        )
         parser.add_argument("--weights_file", type=str)
         parser.add_argument("--weights_prefix", type=str, default="")
 
@@ -58,6 +62,7 @@ class Base(LightningModule):
 
         self.model_cfg["backbone"] |= dict(
             type="mmselfsup.DynamicResNet",
+            init_cfg=dict(type="Pretrained", checkpoint=self.hparams.mm_weights_file),
             conv_cfg=dict(type="DynConv2d"),
             norm_cfg=norm_cfg,
             in_channels=3,
@@ -69,8 +74,11 @@ class Base(LightningModule):
 
         self.model = MMCV_MODELS.build(cfg=self.model_cfg)
 
-        if not self.hparams.resume_run_id and self.hparams.weights_file:
-            self.load_weights_from_file()
+        if not self.hparams.resume_run_id:
+            if self.hparams.weights_file:
+                self.load_weights_from_file()
+            elif self.hparams.mm_weights_file:
+                self.model.init_weights()
 
     def load_weights_from_file(self):
         obj = load(

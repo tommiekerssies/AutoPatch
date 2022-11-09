@@ -9,7 +9,6 @@ from albumentations import (
     VerticalFlip,
     Rotate,
     CropNonEmptyMaskIfExists,
-    RandomScale,
 )
 from app.dataset.aoi import AOI as AOIDataset
 
@@ -18,10 +17,9 @@ class AOI(Base):
     @staticmethod
     def add_argparse_args(parser):
         Base.add_argparse_args(parser)
-        parser.add_argument("--crop_size", type=int, default=256)
+        parser.add_argument("--crop_size", type=int)
         parser.add_argument("--augment", action="store_true")
         parser.add_argument("--val_batch_size", type=int)
-        parser.add_argument("--scale_factor", type=float, default=8.0)
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
@@ -45,14 +43,13 @@ class AOI(Base):
                 Rotate(limit=(90, 90)),  # type: ignore
             ]
 
-        scale_factor = self.hparams.scale_factor - 1
-        preprocessing = [RandomScale((scale_factor, scale_factor), always_apply=True), ToTensorV2()]  # type: ignore
+        preprocessing = [ToTensorV2()]
 
         additional_targets = {"ignore_mask": "mask"}
 
         train_dataset_path = os.path.join(self.dataset_path, "train_buffer00_only_wire")
         val_dataset_path = os.path.join(
-            self.dataset_path, "val_cropped_buffer00_only_wire_256"
+            self.dataset_path, "val_cropped_buffer00_only_wire"
         )
 
         self.train_dataset = AOIDataset(

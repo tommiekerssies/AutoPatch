@@ -3,7 +3,6 @@ from pytorch_lightning import LightningModule
 from os.path import join
 import lib.gaia.dynamic_resnet
 import lib.gaia.dynamic_conv
-import lib.gaia.dynamic_sync_bn
 import lib.gaia.dynamic_bn
 from mmcv.cnn import MODELS as MMCV_MODELS
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
@@ -33,15 +32,10 @@ class Base(LightningModule):
     @staticmethod
     def add_argparse_args(parser):
         parser.add_argument("--lr", type=float, default=1e-3)
-        parser.add_argument("--stem_width", nargs="+", type=int, default=[32, 32, 64])
-        parser.add_argument(
-            "--body_width", nargs="+", type=int, default=[64, 128, 256, 512]
-        )
+        parser.add_argument("--stem_width", type=int, default=64)
+        parser.add_argument("--body_width", nargs="+", type=int, default=[64, 128, 256, 512])
         parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2, 2, 2])
-        parser.add_argument(
-            "--mm_weights_file", type=str, default="open-mmlab://resnet18_v1c"
-        )
-        parser.add_argument("--weights_file", type=str)
+        parser.add_argument("--weights_file", type=str, default="resnet18-f37072fd.pth")
         parser.add_argument("--weights_prefix", type=str, default="")
 
     def __init__(self):
@@ -54,31 +48,30 @@ class Base(LightningModule):
         if "backbone" not in self.model_cfg:
             self.model_cfg["backbone"] = {}
 
-        norm_cfg = (
-            dict(type="SyncDynBN", requires_grad=True)
-            if self.hparams.sync_bn
-            else dict(type="DynBN", requires_grad=True)
-        )
-
+        dilations = (1, 1, 2, 4)
+        strides = (1, 2, 1, 1)
+        out_indices=(0, 1, 2, 3)
+        num_stages = len(self.hparams.body_depth)
+        
         self.model_cfg["backbone"] |= dict(
             type="mmselfsup.DynamicResNet",
-            init_cfg=dict(type="Pretrained", checkpoint=self.hparams.mm_weights_file),
             conv_cfg=dict(type="DynConv2d"),
-            norm_cfg=norm_cfg,
+            norm_cfg=dict(type="DynBN"),
             in_channels=3,
-            deep_stem=True,
             stem_width=self.hparams.stem_width,
             body_width=self.hparams.body_width,
             body_depth=self.hparams.body_depth,
+            num_stages=num_stages,
+            dilations=dilations[:num_stages],
+            strides=strides[:num_stages],
+            out_indices=out_indices[:num_stages],
+            contract_dilation=True,
         )
 
         self.model = MMCV_MODELS.build(cfg=self.model_cfg)
 
-        if not self.hparams.resume_run_id:
-            if self.hparams.weights_file:
-                self.load_weights_from_file()
-            elif self.hparams.mm_weights_file:
-                self.model.init_weights()
+        if not self.hparams.resume_run_id and self.hparams.weights_file:
+            self.load_weights_from_file()
 
     def load_weights_from_file(self):
         obj = load(

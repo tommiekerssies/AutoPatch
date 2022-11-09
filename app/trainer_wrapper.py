@@ -1,7 +1,7 @@
 from argparse import Namespace
 import inspect
 from os import environ
-from pytorch_lightning import Trainer, seed_everything
+from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 import wandb
 from app.callback.scheduled_stop import ScheduledStopCallback
@@ -21,8 +21,7 @@ class TrainerWrapper(Trainer):
         parser.add_argument("--resume_run_id", type=str)
         parser.add_argument("--stop_time", type=str)
         parser.add_argument("--patience", type=int)
-        parser.add_argument("--project_name", type=str)
-        parser.add_argument("--sync_bn", action="store_true")
+        parser.add_argument("--project_name", type=str, default="fine-tune_aoi")
         parser.add_argument("--max_gflops", type=float)
         parser.add_argument("--supernet_run_id", type=str)
         parser.add_argument("--model_space_file", type=str)
@@ -39,7 +38,6 @@ class TrainerWrapper(Trainer):
         max_epochs,
         monitor,
         monitor_mode,
-        sync_bn,
         model_space_file,
         max_gflops,
         **kwargs,
@@ -49,8 +47,6 @@ class TrainerWrapper(Trainer):
         self.work_dir = work_dir
         self.model_space_file = model_space_file
         self.max_gflops = max_gflops
-
-        seed_everything(seed, workers=True)
 
         callbacks = [
             ModelCheckpoint(
@@ -99,8 +95,6 @@ class TrainerWrapper(Trainer):
             callbacks=callbacks,
             max_epochs=max_epochs or -1,
             logger=logger,
-            benchmark=True,
-            sync_batchnorm=sync_bn,
         )
 
         super().__init__(**self.trainer_kwargs)

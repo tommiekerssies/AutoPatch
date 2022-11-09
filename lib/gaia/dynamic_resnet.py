@@ -109,7 +109,6 @@ class DynamicResNet(BaseModule, DynamicMixin):
         with_cp=False,
         zero_init_residual=True,
         contract_dilation=False,  # add contract_dilation
-        init_cfg=None,
     ):
         super(DynamicResNet, self).__init__()
         self.body_depth = body_depth
@@ -140,6 +139,7 @@ class DynamicResNet(BaseModule, DynamicMixin):
         self.plugins = plugins
         self.zero_init_residual = zero_init_residual
         self.block = DynamicBasicBlock
+        # self.block = DynamicBottleneck
         self.body_depth = body_depth[:num_stages]
 
         # Fix the use of Resnetv1c
@@ -376,8 +376,8 @@ class DynamicResNet(BaseModule, DynamicMixin):
                 for m in self.modules():
                     if isinstance(m, DynamicBottleneck):
                         constant_init(m.norm3, 0)
-                    # elif isinstance(m, DynamicBasicBlock):
-                    #     constant_init(m.norm2, 0)
+                    elif isinstance(m, DynamicBasicBlock):
+                        constant_init(m.norm2, 0)
 
         else:
             raise TypeError("pretrained must be a str or None")

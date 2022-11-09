@@ -9,27 +9,21 @@ class FCN(Base):
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
-        head = dict(
-            type="FCNHead",
-            num_convs=0,
-            num_classes=self.hparams.num_classes,
-            norm_cfg=self.decoder_norm_cfg,
-            concat_input=False,
-            threshold=0.0,  # not used but here to prevent log warning
-        )
         self.model_cfg = dict(
             type="mmseg.EncoderDecoder",
             decode_head=dict(
                 in_channels=self.hparams.body_width[-1],
                 channels=self.hparams.body_width[-1],
-                **head,
+                num_convs=0,
+                **self.head_cfg,
             ),
             auxiliary_head=[
                 dict(
                     in_channels=self.hparams.body_width[-2],
                     channels=self.hparams.body_width[-2],
                     in_index=-2,
-                    **head,
+                    num_convs=0,
+                    **self.head_cfg,
                 )
             ],
         )

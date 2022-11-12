@@ -47,23 +47,23 @@ class AOI(Base):
 
         additional_targets = {"ignore_mask": "mask"}
 
-        train_dataset_path = os.path.join(self.dataset_path, "train_buffer00_only_wire")
-        val_dataset_path = os.path.join(
+        self.train_path = os.path.join(self.dataset_path, "train_buffer00_only_wire")
+        self.val_path = os.path.join(
             self.dataset_path, "val_cropped_buffer00_only_wire"
         )
 
         self.train_dataset = AOIDataset(
-            train_dataset_path,
+            self.train_path,
             transform=Compose(
                 augmentations + preprocessing, additional_targets=additional_targets
             ),
         )
         self.val_dataset = AOIDataset(
-            val_dataset_path,
+            self.val_path,
             transform=Compose(preprocessing, additional_targets=additional_targets),
         )
         self.predict_dataset = AOIDataset(
-            train_dataset_path,
+            self.val_path,
             transform=Compose(preprocessing, additional_targets=additional_targets),
         )
 

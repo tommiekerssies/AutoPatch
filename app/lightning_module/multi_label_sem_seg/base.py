@@ -95,7 +95,7 @@ class Base(BaseLM):
         )
 
         aux_outs = []
-        if self.training:
+        if self.training and hasattr(self.model, "auxiliary_head"):
             aux_outs.extend(
                 resize(
                     input=aux_head(x),

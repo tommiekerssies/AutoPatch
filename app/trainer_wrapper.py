@@ -28,7 +28,6 @@ class TrainerWrapper(Trainer):
 
     def __init__(
         self,
-        seed,
         resume_run_id,
         supernet_run_id,
         project_name,
@@ -91,7 +90,7 @@ class TrainerWrapper(Trainer):
             strategy="ddp_find_unused_parameters_false",
             accelerator="auto",
             log_every_n_steps=1,
-            deterministic="warn",
+            deterministic=False,
             callbacks=callbacks,
             max_epochs=max_epochs or -1,
             logger=logger,

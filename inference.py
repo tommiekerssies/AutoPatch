@@ -1,56 +1,13 @@
 # %%
 from itertools import islice
 from statistics import mean, stdev
+import cv2
 from pytorch_lightning import seed_everything
 import wandb
 import torch
 from app.lightning_module.multi_label_sem_seg.fcn import FCN
 from app.lightning_data_module.aoi import AOI
 import matplotlib.pyplot as plt
-
-
-torch.cuda.set_device("cuda:0")
-torch.cuda.empty_cache()
-seed = 0
-seed_everything(seed, workers=True)
-wandb.init(mode="disabled")
-work_dir="/dataB1/tommie_kerssies/"
-
-ldm = AOI(
-    work_dir=work_dir,
-    seed=seed,
-    num_workers=0,
-    batch_size=1,
-    crop_size=None,
-    augment=False,
-    val_batch_size=1,
-).setup()
-
-# %%
-model = FCN(
-    work_dir=work_dir,
-    stem_width=64,
-    body_width=[64, 128, 256, 512],
-    body_depth=[1, 1, 1, 1],
-    num_classes=1,
-    supernet_run_id=None,
-    resume_run_id=None,
-    weights_file="resnet_10_23dataset.pth",
-    weights_prefix="module.",
-)
-model = model.cuda()
-
-# %%
-model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/3klbth8k/checkpoints/last.ckpt"
-model = FCN.load_from_checkpoint(model_path)
-# model = AOI_LM(
-#     stem_width=32,
-#     body_width=[32, 64, 128, 256],
-#     body_depth=[2, 2, 2, 2],
-#     num_classes=3,
-#     supernet_run_id=None,
-# )
-# model = model.cuda()
 
 
 def visualize(figsize=(40, 10), **images):
@@ -65,7 +22,51 @@ def visualize(figsize=(40, 10), **images):
         plt.imshow(image)
     plt.show()
 
+torch.cuda.set_device("cuda:0")
+torch.cuda.empty_cache()
+seed = 0
+seed_everything(seed, workers=True)
+wandb.init(mode="disabled")
+work_dir="/dataB1/tommie_kerssies/"
 
+ldm = AOI(
+    work_dir=work_dir,
+    seed=seed,
+    num_workers=0,
+    batch_size=1,
+    crop_size=2048,
+    augment=False,
+    val_batch_size=1,
+).setup()
+
+model = FCN(
+    work_dir=work_dir,
+    stem_width=64,
+    body_width=[64, 128, 256, 512],
+    body_depth=[2, 2, 2, 2],
+    num_classes=1,
+    supernet_run_id=None,
+    resume_run_id=None,
+    weights_file="mocov2plus-aoi-34n0nyj9-ep=593.ckpt",
+    weights_prefix="backbone.",
+)
+model = model.cuda()
+
+# %%
+model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/31c9y8nf/checkpoints/last.ckpt"
+model = FCN.load_from_checkpoint(model_path).cuda()
+
+#%%
+# model = AOI_LM(
+#     stem_width=32,
+#     body_width=[32, 64, 128, 256],
+#     body_depth=[2, 2, 2, 2],
+#     num_classes=3,
+#     supernet_run_id=None,
+# )
+# model = model.cuda()
+
+#%%
 for batch in islice(ldm.train_dataloader(), 0, 10):
     img, masks, ignore_mask = (
         batch["image"],
@@ -81,6 +82,31 @@ for batch in islice(ldm.train_dataloader(), 0, 10):
         aux_out=aux_outs[0][0].detach().sigmoid().permute(1, 2, 0).cpu(),
         out=out[0].detach().sigmoid().permute(1, 2, 0).cpu(),
     )
+
+#%%
+import os
+import cv2
+from torchvision.transforms import ToTensor
+path = f"{ldm.train_path}/img/"
+for file in os.listdir(path):
+    if "Hana_TDFN6L_1.1X1.13" not in file:
+        continue
+    img = cv2.imread(path + file)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = ToTensor()(img)
+    img = img.unsqueeze(0)
+    img = img.cuda()
+    X = model.model.backbone(img.float())
+    img = img[0]
+    img = img.permute(1, 2, 0)
+    img = img.cpu()
+    for x in X:
+        x = x.detach()
+        x = x.squeeze(0)
+        x = torch.mean(x, dim=0)
+        x = x.cpu()
+        visualize(x=x, img=img)
+    break
 
 #%%
 starter = torch.cuda.Event(enable_timing=True)

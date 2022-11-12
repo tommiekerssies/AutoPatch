@@ -217,49 +217,49 @@ ldm = AOI_LDM(
 # print()
 
 # %%
-num_cropped = 0
-num_not_cropped = 0
-size_before = 2048
-size_after = 256
-old_dir = "val_cropped_buffer00_only_wire"
-new_dir = "val_cropped_buffer00_only_wire_256"
-for batch in ldm.val_dataloader():
-    img_tensor, img_path, mask_path = (
-        batch["image"][0],
-        batch["img_path"][0],
-        batch["mask_path"][0],
-    )
-    if img_tensor.shape[-1] == size_before:
-        num_cropped += 1
-        import cv2
-        from pathlib import Path
+# num_cropped = 0
+# num_not_cropped = 0
+# size_before = 2048
+# size_after = 256
+# old_dir = "val_cropped_buffer00_only_wire"
+# new_dir = "val_cropped_buffer00_only_wire_256"
+# for batch in ldm.val_dataloader():
+#     img_tensor, img_path, mask_path = (
+#         batch["image"][0],
+#         batch["img_path"][0],
+#         batch["mask_path"][0],
+#     )
+#     if img_tensor.shape[-1] == size_before:
+#         num_cropped += 1
+#         import cv2
+#         from pathlib import Path
 
-        img = cv2.imread(img_path)
-        mask = cv2.imread(mask_path)
-        for r in range(0, img.shape[0], size_after):
-            for c in range(0, img.shape[1], size_after):
-                cv2.imwrite(
-                    img_path.replace(".bmp", f"_{r}_{c}.bmp").replace(old_dir, new_dir),
-                    img[r : r + size_after, c : c + size_after, :],
-                )
-                cv2.imwrite(
-                    mask_path.replace(".png", f"_{r}_{c}.png").replace(
-                        old_dir, new_dir
-                    ),
-                    mask[r : r + size_after, c : c + size_after, :],
-                )
-    else:
-        copy2(
-            img_path,
-            f"/dataB1/tommie_kerssies/multilabel_v6/{new_dir}/img/",
-        )
-        copy2(
-            mask_path,
-            f"/dataB1/tommie_kerssies/multilabel_v6/{new_dir}/lbl/",
-        )
-        num_not_cropped += 1
-    print(
-        f"num_not_cropped: {num_not_cropped}, num_cropped: {num_cropped}",
-        end="\r",
-    )
-print()
+#         img = cv2.imread(img_path)
+#         mask = cv2.imread(mask_path)
+#         for r in range(0, img.shape[0], size_after):
+#             for c in range(0, img.shape[1], size_after):
+#                 cv2.imwrite(
+#                     img_path.replace(".bmp", f"_{r}_{c}.bmp").replace(old_dir, new_dir),
+#                     img[r : r + size_after, c : c + size_after, :],
+#                 )
+#                 cv2.imwrite(
+#                     mask_path.replace(".png", f"_{r}_{c}.png").replace(
+#                         old_dir, new_dir
+#                     ),
+#                     mask[r : r + size_after, c : c + size_after, :],
+#                 )
+#     else:
+#         copy2(
+#             img_path,
+#             f"/dataB1/tommie_kerssies/multilabel_v6/{new_dir}/img/",
+#         )
+#         copy2(
+#             mask_path,
+#             f"/dataB1/tommie_kerssies/multilabel_v6/{new_dir}/lbl/",
+#         )
+#         num_not_cropped += 1
+#     print(
+#         f"num_not_cropped: {num_not_cropped}, num_cropped: {num_cropped}",
+#         end="\r",
+#     )
+# print()

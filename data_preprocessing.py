@@ -1,15 +1,18 @@
 # %%
+# sourcery skip: raise-specific-error
 from pytorch_lightning import seed_everything
 import wandb
 import torch
 from app.lightning_data_module.aoi import AOI as AOI_LDM
 from shutil import copy2
+import os
 
 
 seed = 0
 seed_everything(seed, workers=True)
 wandb.init(mode="disabled")
 
+#%%
 ldm = AOI_LDM(
     work_dir="/dataB1/tommie_kerssies/",
     seed=seed,
@@ -21,6 +24,33 @@ ldm = AOI_LDM(
     pin_memory=False,
     scale_factor=1.0,
 ).setup()
+
+# %%
+# TODO: remove low res images by hand
+num_copied = 0
+path = "/dataB1/joris/datasets/aoi/basesets_v2/"
+for root, dirs, files in os.walk(path):
+    for file in files:
+        src_path = f"{root}/{file}"
+        dst_path = src_path.replace("/dataB1/joris/datasets/aoi/basesets/", "")
+        dst_path = dst_path.replace("labelled/", "")
+        dst_path = dst_path.replace("unlabelled/", "")
+        dst_path = "/".join(dst_path.split("/")[1:])
+        dst_path = dst_path.replace("WT_DataBase/", "")
+        dst_path = dst_path.replace("data/", "")
+        dst_path = dst_path.replace("RealImage/", "")
+        dst_path = dst_path.replace("record/", "")
+        dst_path = dst_path.replace("/", "_")
+        dst_path = f"/dataB1/tommie_kerssies/basesets/{dst_path}"
+        # TODO: make a regex out of some of the below
+        if file.endswith(".bmp") and "_WireLabel" not in file and "_Label.bmp" and "00130008.bmp" not in file and "00130007.bmp" not in file and "00130006.bmp" not in file and "WTRL_00130005.bmp" and "00130004.bmp" not in file and "00130003.bmp" not in file and "00130002.bmp" not in file and "00130001.bmp" not in file:
+            num_copied += 1
+            copy2(src_path, dst_path)
+        print(
+            f"num_copied: {num_copied}",
+            end="\r",
+        )
+print()
 
 # %%
 # num_non_ignore = 0
@@ -260,6 +290,26 @@ ldm = AOI_LDM(
 #         num_not_cropped += 1
 #     print(
 #         f"num_not_cropped: {num_not_cropped}, num_cropped: {num_cropped}",
+#         end="\r",
+#     )
+# print()
+
+# %%
+# import os
+# num_buffer0 = 0
+# num_buffer1 = 0
+# path = "/dataB1/joris/datasets/aoi/basesets_processed/WT_database_jpeg/"
+# for file in os.listdir(path):
+#     if "buffer00" in file:
+#         num_buffer0 += 1
+#         copy2(
+#             path + file,
+#             "/dataB1/tommie_kerssies/WT_database_jpeg_buffer00",
+#         )
+#     else:
+#         num_buffer1 += 1
+#     print(
+#         f"num_buffer0: {num_buffer0}, num_buffer1: {num_buffer1}",
 #         end="\r",
 #     )
 # print()

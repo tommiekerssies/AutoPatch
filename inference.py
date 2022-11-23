@@ -34,26 +34,27 @@ ldm = AOI(
     seed=seed,
     num_workers=0,
     batch_size=1,
-    crop_size=2048,
+    crop_size=512,
     augment=False,
     val_batch_size=1,
 ).setup()
 
+#%%
 model = FCN(
     work_dir=work_dir,
     stem_width=64,
-    body_width=[64, 128, 256, 512],
-    body_depth=[2, 2, 2, 2],
+    body_width=[64, 128],
+    body_depth=[2, 2],
     num_classes=1,
     supernet_run_id=None,
     resume_run_id=None,
-    weights_file="mocov2plus-aoi-34n0nyj9-ep=593.ckpt",
+    weights_file="/home/tommie_kerssies/solo-learn/trained_models/byol/b9kdrl1f/last.ckpt",
     weights_prefix="backbone.",
 )
 model = model.cuda()
 
 # %%
-model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/31c9y8nf/checkpoints/last.ckpt"
+model_path = "/dataB1/tommie_kerssies/fine-tune_aoi/2xyagx8l/checkpoints/last.ckpt"
 model = FCN.load_from_checkpoint(model_path).cuda()
 
 #%%
@@ -88,25 +89,26 @@ import os
 import cv2
 from torchvision.transforms import ToTensor
 path = f"{ldm.train_path}/img/"
-for file in os.listdir(path):
-    if "Hana_TDFN6L_1.1X1.13" not in file:
-        continue
+for file in os.listdir(path)[0:10]:
     img = cv2.imread(path + file)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = ToTensor()(img)
     img = img.unsqueeze(0)
     img = img.cuda()
-    X = model.model.backbone(img.float())
+    x = model.model.backbone(img.float())[-1]
+    # out = model.model.decode_head(x)
+    # out = out.detach()
+    # out = out.sigmoid()
+    # out = out.squeeze(0)
+    # out = out.cpu()
+    x = x.detach()
+    x = x.squeeze(0)
+    x = torch.mean(x, dim=0)
+    x = x.cpu()
     img = img[0]
     img = img.permute(1, 2, 0)
     img = img.cpu()
-    for x in X:
-        x = x.detach()
-        x = x.squeeze(0)
-        x = torch.mean(x, dim=0)
-        x = x.cpu()
-        visualize(x=x, img=img)
-    break
+    visualize(x=x, img=img)
 
 #%%
 starter = torch.cuda.Event(enable_timing=True)

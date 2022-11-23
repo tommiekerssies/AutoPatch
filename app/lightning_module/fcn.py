@@ -3,21 +3,51 @@ from torch.nn import ModuleList
 from torch.nn.functional import binary_cross_entropy_with_logits
 from app.metric.iou import IoUMetric
 from app.metric.mean import MeanMetric
-from app.lightning_module.base import Base as BaseLM
+from app.lightning_module.base import Base
 from torch.optim import Adam
 from mmseg.ops import resize
 
 
-class Base(BaseLM):
+class FCN(Base):
     @staticmethod
     def add_argparse_args(parser):
-        BaseLM.add_argparse_args(parser)
+        Base.add_argparse_args(parser)
         parser.add_argument("--num_classes", type=int, default=1)
         parser.add_argument("--align_corners", action="store_true")
         parser.add_argument("--monitor", type=str, default="val_IoU_0")
         parser.add_argument("--monitor_mode", type=str, default="max")
+        parser.add_argument("--fcn_head_width", type=int, default=128)
+        parser.add_argument("--fcn_head_depth", type=int, default=2)
+        parser.add_argument("--aux_weight", type=float, default=0.4)
+        parser.add_argument("--dropout_ratio", type=float, default=0.1)
 
-    def __init__(self):
+    def __init__(self, **kwargs):
+        self.save_hyperparameters()
+        head_cfg = dict(
+            type="FCNHead",
+            norm_cfg=dict(type="SyncBN"),
+            num_classes=self.hparams.num_classes,
+            dropout_ratio=self.hparams.dropout_ratio,
+            threshold=0.0,  # not used, but here to prevent log warning
+            concat_input=False,
+        )
+        self.model_cfg = dict(
+            type="mmseg.EncoderDecoder",
+            decode_head=dict(
+                in_index=-1,
+                in_channels=self.hparams.body_width[-1],
+                channels=self.hparams.fcn_head_width,
+                num_convs=self.hparams.fcn_head_depth,
+                **head_cfg,
+            ),
+            auxiliary_head=[dict(
+                in_index=-2,
+                in_channels=self.hparams.body_width[-2],
+                channels=self.hparams.fcn_head_width // 2,
+                num_convs=1,
+                **head_cfg,
+            )],
+        )
         super().__init__()
 
         self.train_IoUs = ModuleList()
@@ -127,13 +157,3 @@ class Base(BaseLM):
         loss_masked = loss.where(non_ignore_mask, tensor(0.0, device=self.device))
 
         return loss_masked.sum() / non_ignore_mask.sum()
-
-    @property
-    def head_cfg(self):
-        return dict(
-            type="FCNHead",
-            num_classes=self.hparams.num_classes,
-            norm_cfg=dict(type="SyncBN"),
-            concat_input=False,
-            threshold=0.0,  # not used, but here to prevent log warning
-        )

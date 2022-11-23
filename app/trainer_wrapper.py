@@ -21,16 +21,16 @@ class TrainerWrapper(Trainer):
         parser.add_argument("--resume_run_id", type=str)
         parser.add_argument("--stop_time", type=str)
         parser.add_argument("--patience", type=int)
-        parser.add_argument("--project_name", type=str, default="fine-tune_aoi")
         parser.add_argument("--max_gflops", type=float)
         parser.add_argument("--supernet_run_id", type=str)
         parser.add_argument("--model_space_file", type=str)
+        parser.add_argument("--project_name", type=str, default="fine-tune_aoi")
+        parser.add_argument("--run_name", type=str)
 
     def __init__(
         self,
         resume_run_id,
         supernet_run_id,
-        project_name,
         work_dir,
         patience,
         stop_time,
@@ -39,6 +39,8 @@ class TrainerWrapper(Trainer):
         monitor_mode,
         model_space_file,
         max_gflops,
+        project_name,
+        run_name,
         **kwargs,
     ):
         self.resume_run_id = resume_run_id
@@ -80,6 +82,7 @@ class TrainerWrapper(Trainer):
             logger = WandbLogger(
                 id=resume_run_id,
                 project=project_name,
+                name=run_name,
                 save_dir=work_dir,
                 resume="must" if resume_run_id else "never",
                 settings=wandb.Settings(code_dir="."),
@@ -94,6 +97,7 @@ class TrainerWrapper(Trainer):
             callbacks=callbacks,
             max_epochs=max_epochs or -1,
             logger=logger,
+            detect_anomaly=True,
         )
 
         super().__init__(**self.trainer_kwargs)

@@ -33,8 +33,9 @@ class Base(LightningModule):
     def add_argparse_args(parser):
         parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--stem_width", type=int, default=64)
-        parser.add_argument("--body_width", nargs="+", type=int, default=[64, 128])
-        parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2])
+        parser.add_argument("--body_width", nargs="+", type=int, default=[64, 128, 256, 512])
+        parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2, 2, 2])
+        parser.add_argument("--frozen", action="store_true")
         parser.add_argument("--weights_file", type=str, default="resnet18-f37072fd.pth")
         parser.add_argument("--weights_prefix", type=str, default="")
 
@@ -58,6 +59,7 @@ class Base(LightningModule):
             conv_cfg=dict(type="DynConv2d"),
             norm_cfg=dict(type="DynBN"),
             in_channels=3,
+            frozen_stages=num_stages if self.hparams.frozen else -1,
             stem_width=self.hparams.stem_width,
             body_width=self.hparams.body_width,
             body_depth=self.hparams.body_depth,

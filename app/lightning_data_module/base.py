@@ -19,6 +19,9 @@ class Base(LightningDataModule):
         return dict(
             num_workers=self.hparams.num_workers,
             pin_memory=self.pin_memory,
-            generator=Generator().manual_seed(self.hparams.seed),
+            generator=self.generator(),
             persistent_workers=self.hparams.num_workers > 0,
         )
+        
+    def generator(self):
+        return Generator().manual_seed(self.hparams.seed)

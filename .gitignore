@@ -1,3 +1,4 @@
+*.html
 *.csv
 *.code-workspace
 logs/

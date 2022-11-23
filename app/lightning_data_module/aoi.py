@@ -1,6 +1,7 @@
 import os
+from random import Random
 from typing import Optional
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from app.lightning_data_module.base import Base
 from albumentations.pytorch import ToTensorV2
 from albumentations import (
@@ -20,6 +21,9 @@ class AOI(Base):
         parser.add_argument("--crop_size", type=int)
         parser.add_argument("--augment", action="store_true")
         parser.add_argument("--val_batch_size", type=int)
+        parser.add_argument("--train_fraction", type=float, default=1.0)
+        parser.add_argument("--train_folder", type=str, default="train_buffer00_only_wire")
+        parser.add_argument("--val_folder", type=str, default="val_cropped_buffer00_only_wire")
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
@@ -47,9 +51,9 @@ class AOI(Base):
 
         additional_targets = {"ignore_mask": "mask"}
 
-        self.train_path = os.path.join(self.dataset_path, "train_buffer00_only_wire")
+        self.train_path = os.path.join(self.dataset_path, self.hparams.train_folder)
         self.val_path = os.path.join(
-            self.dataset_path, "val_cropped_buffer00_only_wire"
+            self.dataset_path, self.hparams.val_folder
         )
 
         self.train_dataset = AOIDataset(
@@ -58,6 +62,13 @@ class AOI(Base):
                 augmentations + preprocessing, additional_targets=additional_targets
             ),
         )
+        
+        if self.hparams.train_fraction < 1.0:
+            indices = list(range(len(self.train_dataset)))
+            Random(self.hparams.seed).shuffle(indices)
+            indices = indices[:int(len(self.train_dataset) * self.hparams.train_fraction)]
+            self.train_dataset = Subset(self.train_dataset, indices)
+        
         self.val_dataset = AOIDataset(
             self.val_path,
             transform=Compose(preprocessing, additional_targets=additional_targets),

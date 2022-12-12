@@ -2,24 +2,24 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from albumentations import Compose
+from pathlib import Path
+from os.path import splitext
 
 
 class AOI(Dataset):
-    def __init__(self, dataset_split_path: str, transform: Compose):
+    def __init__(self, work_dir: str, img_folder: str, mask_folder: str,
+                 transform: Compose):
+        self.transform = transform
         self.imgs = []
         self.masks = []
-        self.transform = transform
+        self.img_size = 2048 # TODO: make this more flexible
 
-        # TODO: make the following more flexible
-        self.img_size = 2048
-
-        for img in os.listdir(os.path.join(dataset_split_path, "img")):
-            self.imgs.append(os.path.join(dataset_split_path, "img", img))
-            self.masks.append(
-                os.path.join(
-                    dataset_split_path, "lbl", f"{os.path.splitext(img)[0]}.png"
-                )
-            )
+        img_path = Path(work_dir, img_folder)
+        lbl_path = Path(work_dir, mask_folder)
+        
+        for img in os.listdir(img_path):
+            self.imgs.append(str(Path(img_path, img)))
+            self.masks.append(str(Path(lbl_path, f"{splitext(img)[0]}.png")))
 
     def __len__(self):
         return len(self.imgs)

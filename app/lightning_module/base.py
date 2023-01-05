@@ -33,10 +33,7 @@ class Base(LightningModule):
     def add_argparse_args(parser):
         parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--stem_width", type=int, default=64)
-        parser.add_argument("--body_width", nargs="+", type=int, default=[64, 128, 256, 512])
-        parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2, 2, 2])
         parser.add_argument("--frozen", action="store_true")
-        parser.add_argument("--weights_file", type=str, default="resnet18-f37072fd.pth")
         parser.add_argument("--weights_prefix", type=str, default="")
 
     def __init__(self):
@@ -44,16 +41,12 @@ class Base(LightningModule):
         self.hparams: Any
         self.model_cfg: dict
         self.ckpt_path: Union[str, None] = None
-        self.log_kwargs = dict(on_step=False, on_epoch=True, sync_dist=True)
+        self.log_kwargs = dict(on_step=True, on_epoch=True, sync_dist=True)
 
         if "backbone" not in self.model_cfg:
             self.model_cfg["backbone"] = {}
 
-        dilations = (1, 1, 2, 4)
-        strides = (1, 2, 1, 1)
-        out_indices=(0, 1, 2, 3)
         num_stages = len(self.hparams.body_depth)
-        
         self.model_cfg["backbone"] |= dict(
             type="mmselfsup.DynamicResNet",
             conv_cfg=dict(type="DynConv2d"),
@@ -63,9 +56,9 @@ class Base(LightningModule):
             stem_width=self.hparams.stem_width,
             body_width=self.hparams.body_width,
             body_depth=self.hparams.body_depth,
-            dilations=dilations[:num_stages],
-            strides=strides[:num_stages],
-            out_indices=out_indices[:num_stages],
+            dilations=self.hparams.dilations[:num_stages],
+            strides=self.hparams.strides[:num_stages],
+            out_indices=self.hparams.out_indices,
             num_stages=num_stages,
             contract_dilation=True,
         )
@@ -91,7 +84,7 @@ class Base(LightningModule):
 
         new_state_dict = {}
         for key, value in state_dict.items():
-            new_key = "model.backbone." + key.replace(self.hparams.weights_prefix, "")
+            new_key = self.hparams.model_prefix + key.replace(self.hparams.weights_prefix, "")
             new_state_dict[new_key] = value
 
         return self.load_state_dict_verbose(new_state_dict)

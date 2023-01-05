@@ -5,13 +5,11 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 import wandb
 from app.callback.scheduled_stop import ScheduledStopCallback
-from app.lightning_module.supernet import SuperNet
-from lib.gaia.base_rule import SAMPLE_RULES
-import lib.gaia.eval_rule as eval_rule
-from mmcv.utils import build_from_cfg
-from lib.gaia.model_space_manager import ModelSpaceManager
-from os.path import join
+from pathlib import Path
 from pytorch_lightning.loggers.wandb import WandbLogger
+from json import load
+
+from app.lightning_module.supernet import SuperNet
 
 
 class TrainerWrapper(Trainer):
@@ -24,7 +22,7 @@ class TrainerWrapper(Trainer):
         parser.add_argument("--max_gflops", type=float)
         parser.add_argument("--supernet_run_id", type=str)
         parser.add_argument("--model_space_file", type=str)
-        parser.add_argument("--project_name", type=str, default="fine-tune_aoi")
+        parser.add_argument("--project_name", type=str, default="mvtec")
         parser.add_argument("--run_name", type=str)
 
     def __init__(
@@ -35,12 +33,12 @@ class TrainerWrapper(Trainer):
         patience,
         stop_time,
         max_epochs,
-        monitor,
-        monitor_mode,
         model_space_file,
         max_gflops,
         project_name,
         run_name,
+        monitor=None,
+        monitor_mode=None,
         **kwargs,
     ):
         self.resume_run_id = resume_run_id
@@ -48,27 +46,35 @@ class TrainerWrapper(Trainer):
         self.work_dir = work_dir
         self.model_space_file = model_space_file
         self.max_gflops = max_gflops
+        self.project_name = project_name
 
-        callbacks = [
-            ModelCheckpoint(
-                monitor=monitor,
-                mode=monitor_mode,
-                save_last=True,
-                filename=f"{{epoch}}-{{{monitor}}}",
-                verbose=True,
-            ),
-            ScheduledStopCallback(stop_time),
-        ]
-
-        if patience:
+        callbacks = []
+        
+        if stop_time:
             callbacks.append(
-                EarlyStopping(
+                ScheduledStopCallback(stop_time)
+            )
+        
+        if monitor and monitor_mode:
+            callbacks.append(
+                ModelCheckpoint(
                     monitor=monitor,
                     mode=monitor_mode,
-                    patience=patience,
+                    save_last=True,
+                    filename=f"{{epoch}}-{{{monitor}}}",
                     verbose=True,
                 )
             )
+
+            if patience:
+                callbacks.append(
+                    EarlyStopping(
+                        monitor=monitor,
+                        mode=monitor_mode,
+                        patience=patience,
+                        verbose=True,
+                    )
+                )
 
         # we only want to pass in valid Trainer args,
         # the rest may be user specific
@@ -111,43 +117,22 @@ class TrainerWrapper(Trainer):
 
         super().fit(lm, datamodule=ldm, ckpt_path=lm.ckpt_path)
 
-    def search(self, ldm):
+    def search(self, lm, ldm):
         # TODO: move this search code closer to supernet, or to a seperate class.
         # TODO: allow resuming supernet searching.
-        if self.supernet_run_id is None:
-            raise ValueError("supernet_run_id must be provided for searching.")
-
-        # create the supernet we want to extract a subnet from
-        supernet_lm = SuperNet.create(
-            resume_run_id=self.supernet_run_id, work_dir=self.work_dir
-        )
-
-        model_space = ModelSpaceManager.load(join(self.work_dir, self.model_space_file))
-        model_sampling_rule = build_from_cfg(
-            dict(
-                type="eval",
-                func_str=f"lambda x: x['overhead.flops'] < {self.max_gflops * 1e9}",
-            ),
-            SAMPLE_RULES,
-        )
-
-        subnet_candidates = model_space.ms_manager.apply_rule(model_sampling_rule)
-        subnet_candidates = subnet_candidates.sample(frac=1).ms_manager.pack()
-
-        best_distance = None
+        subnet_candidates = load(open(Path(self.work_dir, self.model_space_file)))
+        
         for subnet in subnet_candidates:
+            if subnet["overhead"]["flops"] > self.max_gflops * 1e9:
+                continue
+                        
             if "encoder_k" in subnet["arch"]:
                 subnet["arch"].pop("encoder_k")
-            supernet_lm.model.manipulate_arch(subnet["arch"])
-            self.predict(supernet_lm, ldm)
-            distance = supernet_lm.distance.compute()
-
-            self.logger.experiment.log(dict(subnet=subnet, distance=distance))  # type: ignore
-            if best_distance is None or distance < best_distance:
-                self.logger.experiment.log(  # type: ignore
-                    dict(best_subnet=subnet, best_distance=distance)
-                )
-                best_distance = distance
+            lm.model.manipulate_arch(subnet["arch"])
+            
+            self.predict(lm, ldm)
+            
+            self.logger.experiment.log(dict(distance=lm.distance.compute(), flops=subnet["overhead"]["flops"]))  # type: ignore
 
     def tune(self, lm, ldm, lr, batch_size, **kwargs):
         auto_lr_find = not lr

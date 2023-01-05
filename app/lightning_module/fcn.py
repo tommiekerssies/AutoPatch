@@ -7,6 +7,8 @@ from app.lightning_module.base import Base
 from torch.optim import Adam
 from mmseg.ops import resize
 
+from lib.gaia.dynamic_res_blocks import DynamicBasicBlock
+
 
 class FCN(Base):
     @staticmethod
@@ -20,6 +22,13 @@ class FCN(Base):
         parser.add_argument("--fcn_head_depth", type=int, default=2)
         parser.add_argument("--aux_weight", type=float, default=0.4)
         parser.add_argument("--dropout_ratio", type=float, default=0.1)
+        parser.add_argument("--out_indices", nargs="+", type=int, default=[0, 1, 2, 3])
+        parser.add_argument("--dilations", nargs="+", type=int, default=[1, 1, 2, 4])
+        parser.add_argument("--strides", nargs="+", type=int, default=[1, 2, 1, 1])
+        parser.add_argument("--body_width", nargs="+", type=int, default=[64, 128, 256, 512])
+        parser.add_argument("--body_depth", nargs="+", type=int, default=[2, 2, 2, 2])
+        parser.add_argument("--weights_file", type=str, default="resnet18-f37072fd.pth")
+        parser.add_argument("--model_prefix", type=str, default="model.backbone.")
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
@@ -47,6 +56,9 @@ class FCN(Base):
                 num_convs=1,
                 **head_cfg,
             )],
+            backbone=dict(
+                block=DynamicBasicBlock,
+            )
         )
         super().__init__()
 

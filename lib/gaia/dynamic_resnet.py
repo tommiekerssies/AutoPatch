@@ -90,6 +90,7 @@ class DynamicResNet(BaseModule, DynamicMixin):
         stem_width,  # width of the stem block
         body_width,  # width of each stage
         body_depth,  # depth of each stage
+        block,
         num_stages=4,
         strides=(1, 2, 2, 2),
         dilations=(1, 1, 1, 1),
@@ -138,8 +139,7 @@ class DynamicResNet(BaseModule, DynamicMixin):
             assert len(stage_with_dcn) == num_stages
         self.plugins = plugins
         self.zero_init_residual = zero_init_residual
-        self.block = DynamicBasicBlock
-        # self.block = DynamicBottleneck
+        self.block = block
         self.body_depth = body_depth[:num_stages]
 
         # Fix the use of Resnetv1c

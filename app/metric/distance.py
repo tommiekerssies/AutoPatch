@@ -1,6 +1,6 @@
 from torchmetrics import Metric
-from torch import tensor, sum, einsum, bmm
-from torch.nn.functional import normalize
+from torch import tensor, sum, bmm
+from torch.nn.functional import normalize, softmax, log_softmax
 
 
 class Distance(Metric):
@@ -9,11 +9,11 @@ class Distance(Metric):
 
     def __init__(self):
         super().__init__()
-        self.add_state("distance", default=tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("total", default=tensor(0.0), dist_reduce_fx="sum")
         self.add_state("count", default=tensor(0), dist_reduce_fx="sum")
 
     def update(self, result_q, result_k):
-        self.distance = self.distance.to(self.device)
+        self.total = self.total.to(self.device)
         self.count = self.count.to(self.device)
 
         for q, k in zip(result_q, result_k):
@@ -27,10 +27,15 @@ class Distance(Metric):
             k = bmm(k.transpose(1, 2), k)
             k = k.view(-1, k.size(2))
 
-            self.distance += sum(einsum("nc,nc->n", [q, k]))
+            self.total += sum(
+                -sum(
+                    softmax(k / 0.2, dim=1) * log_softmax(q / 0.2, dim=1),
+                    dim=1,
+                )
+            )
             self.count += q.size(0)
 
         return self
 
     def compute(self):
-        return self.distance / self.count
+        return self.total / self.count

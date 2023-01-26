@@ -416,8 +416,9 @@ class DynamicResNet(BaseModule, DynamicMixin):
         self.body_state = arch_meta
         # DL to LD
         sliced_arch_meta = [dict(zip(arch_meta, t)) for t in zip(*arch_meta.values())]
-        for i, layer_name in enumerate(self.res_layers):
-            res_layer = getattr(self, layer_name)
+        self.num_stages = len(sliced_arch_meta)
+        for i in range(self.num_stages):
+            res_layer = getattr(self, self.res_layers[i])
             res_layer.manipulate_arch(sliced_arch_meta[i])
 
     def forward(self, x):
@@ -430,8 +431,8 @@ class DynamicResNet(BaseModule, DynamicMixin):
             x = self.relu(x)
         x = self.maxpool(x)
         outs = []
-        for i, layer_name in enumerate(self.res_layers):
-            res_layer = getattr(self, layer_name)
+        for i in range(self.num_stages):
+            res_layer = getattr(self, self.res_layers[i])
             x = res_layer(x)
             if i in self.out_indices:
                 outs.append(x)

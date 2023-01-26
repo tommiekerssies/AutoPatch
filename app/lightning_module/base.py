@@ -32,8 +32,6 @@ class Base(LightningModule):
     @staticmethod
     def add_argparse_args(parser):
         parser.add_argument("--lr", type=float, default=1e-3)
-        parser.add_argument("--stem_width", type=int, default=64)
-        parser.add_argument("--frozen", action="store_true")
         parser.add_argument("--weights_prefix", type=str, default="")
 
     def __init__(self):
@@ -46,21 +44,20 @@ class Base(LightningModule):
         if "backbone" not in self.model_cfg:
             self.model_cfg["backbone"] = {}
 
-        num_stages = len(self.hparams.body_depth)
         self.model_cfg["backbone"] |= dict(
             type="mmselfsup.DynamicResNet",
             conv_cfg=dict(type="DynConv2d"),
             norm_cfg=dict(type="DynBN"),
             in_channels=3,
-            frozen_stages=num_stages if self.hparams.frozen else -1,
             stem_width=self.hparams.stem_width,
             body_width=self.hparams.body_width,
             body_depth=self.hparams.body_depth,
-            dilations=self.hparams.dilations[:num_stages],
-            strides=self.hparams.strides[:num_stages],
-            out_indices=self.hparams.out_indices,
-            num_stages=num_stages,
+            dilations=self.hparams.dilations[:self.hparams.num_stages],
+            strides=self.hparams.strides[:self.hparams.num_stages],
+            out_indices=[0, 1, 2, 3][:self.hparams.num_stages],
+            num_stages=self.hparams.num_stages,
             contract_dilation=True,
+            block=self.block,
         )
 
         self.model = MMCV_MODELS.build(cfg=self.model_cfg)
@@ -84,7 +81,9 @@ class Base(LightningModule):
 
         new_state_dict = {}
         for key, value in state_dict.items():
-            new_key = self.hparams.model_prefix + key.replace(self.hparams.weights_prefix, "")
+            new_key = self.hparams.model_prefix + key.replace(
+                self.hparams.weights_prefix, ""
+            )
             new_state_dict[new_key] = value
 
         return self.load_state_dict_verbose(new_state_dict)
@@ -94,7 +93,7 @@ class Base(LightningModule):
 
         imported_keys = state_dict.keys() - unexpected_keys
 
-        rank_zero_info(f"Imported keys: {imported_keys}")
+        # rank_zero_info(f"Imported keys: {imported_keys}")
         rank_zero_info(f"Missing keys: {missing_keys}")
         rank_zero_info(f"Unexpected keys: {unexpected_keys}")
 

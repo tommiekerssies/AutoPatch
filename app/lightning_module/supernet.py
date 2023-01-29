@@ -1,4 +1,3 @@
-from app.metric.distance import Distance
 from app.lightning_module.base import Base
 from lib.gaia.dynamic_moco import DynamicMOCO
 from lib.gaia.dynamic_nonlinear_neck import DynamicNonLinearNeckV1
@@ -59,25 +58,9 @@ class SuperNet(Base):
         )
         super().__init__()
 
-        self.distance = Distance()
-
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        all_outs_q = self.model.encoder_q[0](batch["img"])
-        outs_q = [all_outs_q[i] for i in self.hparams.out_layers]
-
-        # only keep track of distance for the first dataloader
-        if dataloader_idx == 0:
-            all_outs_k = self.model.encoder_k[0](batch["img"])
-            outs_k = [all_outs_k[i] for i in self.hparams.out_layers]
-            self.distance(outs_q, outs_k)
-
-        return outs_q
-
-    def on_predict_start(self):
-        self.distance.reset()
-
-    def on_predict_end(self):
-        self.distance.compute()
+        outs_q = self.model.encoder_q[0](batch["img"])
+        return [outs_q[i] for i in self.hparams.out_layers]
 
     def get_subnets(self):
         body_widths = [

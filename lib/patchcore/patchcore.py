@@ -139,25 +139,15 @@ class PatchCore(torch.nn.Module):
 
             features = concatenate(features, axis=0)
             patch_shapes = concatenate(patch_shapes, axis=0)
-
-            patch_scores = image_scores = self.anomaly_scorer.predict([features])[0]
-            # self.anomaly_scorer.nn_method.reset_index()
-            image_scores = self.patch_maker.unpatch_scores(
-                image_scores, batch_size=outs_size
-            )
-            image_scores = image_scores.reshape(*image_scores.shape[:2], -1)
-            image_scores = self.patch_maker.score(image_scores)
-
+            
+            patch_scores = self.anomaly_scorer.predict([features])[0]
             patch_scores = self.patch_maker.unpatch_scores(
                 patch_scores, batch_size=outs_size
             )
             scales = patch_shapes[0]
             patch_scores = patch_scores.reshape(outs_size, scales[0], scales[1])
 
-            masks = self.anomaly_segmentor.convert_to_segmentation(patch_scores)
-
-        return list(image_scores), list(masks)
-
+            return self.anomaly_segmentor.convert_to_segmentation(patch_scores)
 
 # Image handling classes.
 class PatchMaker:
@@ -195,12 +185,3 @@ class PatchMaker:
 
     def unpatch_scores(self, x, batch_size):
         return x.reshape(batch_size, -1, *x.shape[1:])
-
-    def score(self, x):
-        was_numpy = False
-        if isinstance(x, ndarray):
-            was_numpy = True
-            x = torch.from_numpy(x)
-        while x.ndim > 1:
-            x = torch.max(x, dim=-1).values
-        return x.numpy() if was_numpy else x

@@ -186,28 +186,15 @@ class RescaleSegmentor:
     def __init__(self, device, target_size=224):
         self.device = device
         self.target_size = target_size
-        self.smoothing = 4
 
     def convert_to_segmentation(self, patch_scores):
-
         with torch.no_grad():
             if isinstance(patch_scores, np.ndarray):
                 patch_scores = torch.from_numpy(patch_scores)
-            _scores = patch_scores.to(self.device)
-            _scores = _scores.unsqueeze(1)
-            _scores = F.interpolate(
-                _scores,
-                size=self.target_size,  # mode="bilinear", align_corners=False
-            )
-            _scores = _scores.squeeze(1)
-            patch_scores = _scores.cpu().numpy()
-
-        return patch_scores
-
-        # return [
-        #     ndimage.gaussian_filter(patch_score, sigma=self.smoothing)
-        #     for patch_score in patch_scores
-        # ]
+            patch_scores = patch_scores.to(self.device)
+            patch_scores = patch_scores.unsqueeze(1)
+            pixel_scores = F.interpolate(patch_scores, size=self.target_size)
+            return pixel_scores.squeeze(1)
 
 
 class NetworkFeatureAggregator(torch.nn.Module):

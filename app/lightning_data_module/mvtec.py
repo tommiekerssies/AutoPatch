@@ -13,8 +13,7 @@ class MVTec(Base):
         parser.add_argument("--img_size", type=int, default=224)
         parser.add_argument("--dataset_dir", type=str, default="MVTec")
         parser.add_argument("--category", type=str, default="temp")
-        parser.add_argument("--train_holdout_ratio", type=float, default=0.5)
-        parser.add_argument("--test_holdout_ratio", type=float, default=0.5)
+        parser.add_argument("--val_ratio", type=float, default=0.5)
 
     def __init__(self, **kwargs):
         self.save_hyperparameters()
@@ -37,36 +36,25 @@ class MVTec(Base):
             self.hparams.work_dir,
             self.hparams.dataset_dir,
             self.hparams.category,
-            self.hparams.train_holdout_ratio,
             self.transform_img,
         )
-        self.train_holdout_dataset = MVTecDataset(
-            "train",
+        self.val_dataset = MVTecDataset(
+            "val",
             self.hparams.work_dir,
             self.hparams.dataset_dir,
             self.hparams.category,
-            self.hparams.train_holdout_ratio,
             self.transform_img,
-            holdout=True,
+            self.transform_mask,
+            self.hparams.val_ratio,
         )
         self.test_dataset = MVTecDataset(
             "test",
             self.hparams.work_dir,
             self.hparams.dataset_dir,
             self.hparams.category,
-            self.hparams.test_holdout_ratio,
             self.transform_img,
             self.transform_mask,
-        )
-        self.test_holdout_dataset = MVTecDataset(
-            "test",
-            self.hparams.work_dir,
-            self.hparams.dataset_dir,
-            self.hparams.category,
-            self.hparams.test_holdout_ratio,
-            self.transform_img,
-            self.transform_mask,
-            holdout=True,
+            self.hparams.val_ratio,
         )
 
         return self
@@ -74,7 +62,6 @@ class MVTec(Base):
     def predict_dataloader(self):
         return [
             DataLoader(self.train_dataset, **self.dataloader_kwargs),
-            DataLoader(self.train_holdout_dataset, **self.dataloader_kwargs),
+            DataLoader(self.val_dataset, **self.dataloader_kwargs),
             DataLoader(self.test_dataset, **self.dataloader_kwargs),
-            DataLoader(self.test_holdout_dataset, **self.dataloader_kwargs),
         ]

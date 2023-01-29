@@ -1,18 +1,15 @@
 import inspect
 from random import shuffle
-from numpy import array, concatenate, count_nonzero
-from pandas import Series, json_normalize, read_csv, merge
+from numpy import argmax, divide, zeros_like
+from pandas import json_normalize, read_csv, merge
 from pytorch_lightning import Trainer
-from sklearn.metrics import jaccard_score
+from sklearn.metrics import f1_score, precision_recall_curve
 import wandb
 from pytorch_lightning.loggers.wandb import WandbLogger
-from lib.patchcore.metrics import (
-    compute_imagewise_retrieval_metrics,
-    compute_pixelwise_retrieval_metrics,
-)
 from lib.patchcore.patchcore import PatchCore
 from os.path import exists
 from pathlib import Path
+from torch import cat, flatten, max, min, squeeze
 
 
 class TrainerWrapper(Trainer):
@@ -76,14 +73,18 @@ class TrainerWrapper(Trainer):
         super().__init__(**self.trainer_kwargs)
 
     def search(self, lm, ldm):
-        masks = concatenate(
-            [batch["mask"] for batch in ldm.setup().predict_dataloader()[2]]
+        pixel_labels_val = squeeze(
+            flatten(
+                cat([batch["mask"] for batch in ldm.setup().predict_dataloader()[1]]),
+                start_dim=-2,
+            )
         )
-        masks_holdout = concatenate(
-            [batch["mask"] for batch in ldm.predict_dataloader()[3]]
+        pixel_labels_test = squeeze(
+            flatten(
+                cat([batch["mask"] for batch in ldm.setup().predict_dataloader()[2]]),
+                start_dim=-2,
+            )
         )
-        anomaly_labels = array([count_nonzero(x) > 0 for x in masks])
-        anomaly_labels_holdout = array([count_nonzero(x) > 0 for x in masks_holdout])
 
         output_path = Path(self.work_dir, f"{self.category}.csv")
 
@@ -105,12 +106,10 @@ class TrainerWrapper(Trainer):
         shuffle(subnets)
 
         for subnet in subnets:
-            arch = subnet["arch"]
-
-            if already_evaluated(arch):
+            if already_evaluated(subnet["arch"]):
                 continue
 
-            lm.model.manipulate_arch(arch)
+            lm.model.manipulate_arch(subnet["arch"])
 
             (
                 subnet["flops"],
@@ -119,14 +118,10 @@ class TrainerWrapper(Trainer):
                 subnet["params_hr"],
             ) = lm.get_backbone_complexity()
 
-            outs_train, outs_train_holdout, outs_test, outs_test_holdout = self.predict(
-                lm, ldm
-            )
-
-            subnet["distance"] = float(lm.distance.compute())
+            outs_train, outs_val, outs_test = self.predict(lm, ldm)
 
             pretrain_embed_dimension = (
-                arch["encoder_q"]["body"]["width"][self.out_layers[-1]]
+                subnet["arch"]["encoder_q"]["body"]["width"][self.out_layers[-1]]
                 * lm.block.expansion
             )
             patchcore = PatchCore(
@@ -137,56 +132,58 @@ class TrainerWrapper(Trainer):
                 target_embed_dimension=pretrain_embed_dimension,
             )
 
-            print("Fitting PatchCore")
+            print("Fitting PatchCore...")
             patchcore.fit(outs_train)
 
-            print("Predicting PatchCore train holdout")
-            scores_train_holdout, _ = patchcore.predict(outs_train_holdout)
-            min_score = min(scores_train_holdout)
-            max_score = max(scores_train_holdout)
+            print("Predicting PatchCore...")
+            unscaled_pixel_scores_val = flatten(
+                patchcore.predict(outs_val), start_dim=-2
+            )
+            unscaled_pixel_scores_test = flatten(
+                patchcore.predict(outs_test), start_dim=-2
+            )
 
-            print("Predicting PatchCore test")
-            scores, segmentations = patchcore.predict(outs_test)
+            print("Computing metrics...")
+            score_max = max(unscaled_pixel_scores_val)
+            score_min = min(unscaled_pixel_scores_val)
 
-            print("Predicting PatchCore test holdout")
-            scores_holdout, segmentations_holdout = patchcore.predict(outs_test_holdout)
+            pixel_scores_val = (unscaled_pixel_scores_val - score_min) / (
+                score_max - score_min
+            )
+            pixel_scores_test = (unscaled_pixel_scores_test - score_min) / (
+                score_max - score_min
+            )
 
-            print("Computing metrics")
-            subnet["test"] = {
-                "thresholded_metrics": self._get_thresholded_metrics(
-                    scores,
-                    segmentations,
-                    masks,
-                    anomaly_labels,
-                    min_score,
-                    max_score,
-                ),
-                "imagewise_retrieval_metrics": compute_imagewise_retrieval_metrics(
-                    scores, anomaly_labels
-                ),
-                "pixelwise_retrieval_metrics": compute_pixelwise_retrieval_metrics(
-                    segmentations, masks
-                ),
-            }
+            precision_curve, recall_curve, thresholds = precision_recall_curve(
+                flatten(pixel_labels_val).int(), flatten(pixel_scores_val).cpu()
+            )
+            f1_scores = divide(
+                2 * precision_curve * recall_curve,
+                precision_curve + recall_curve,
+                out=zeros_like(precision_curve),
+                where=(precision_curve + recall_curve) != 0,
+            )
+            i_f1_max = argmax(f1_scores)
 
-            subnet["test_holdout"] = {
-                "thresholded_metrics": self._get_thresholded_metrics(
-                    scores_holdout,
-                    segmentations_holdout,
-                    masks_holdout,
-                    anomaly_labels_holdout,
-                    min_score,
-                    max_score,
-                ),
-                "imagewise_retrieval_metrics": compute_imagewise_retrieval_metrics(
-                    scores_holdout, anomaly_labels_holdout
-                ),
-                "pixelwise_retrieval_metrics": compute_pixelwise_retrieval_metrics(
-                    segmentations_holdout, masks_holdout
-                ),
-            }
+            subnet["pixel_f1_val"] = f1_score(
+                flatten(pixel_labels_val).bool(),
+                flatten(pixel_scores_val.cpu() > thresholds[i_f1_max]),
+            )
+            subnet["pixel_f1_test"] = f1_score(
+                flatten(pixel_labels_test).bool(),
+                flatten(pixel_scores_test.cpu() > thresholds[i_f1_max]),
+            )
 
-            if already_evaluated(arch):
+            subnet["img_f1_val"] = f1_score(
+                max(pixel_labels_val, dim=-1).bool(),
+                max(pixel_scores_val, dim=-1).cpu() > thresholds[i_f1_max],
+            )
+            subnet["img_f1_test"] = f1_score(
+                max(pixel_labels_test, dim=-1).bool(),
+                max(pixel_scores_test, dim=-1).cpu() > thresholds[i_f1_max],
+            )
+
+            if already_evaluated(subnet["arch"]):
                 continue
 
             json_normalize(subnet).to_csv(
@@ -195,47 +192,3 @@ class TrainerWrapper(Trainer):
                 header=not exists(output_path),
                 index=False,
             )
-
-    def _get_thresholded_metrics(
-        self,
-        scores,
-        segmentations,
-        masks,
-        anomaly_labels,
-        min_score,
-        max_score,
-        threshold=1.0,
-    ):
-        binary_preds = ((scores - min_score) / (max_score - min_score)) > threshold
-        binary_segmentations = (
-            (segmentations - min_score) / (max_score - min_score)
-        ) > threshold
-
-        IoU = []
-        for i in range(len(binary_segmentations)):
-            pred = binary_segmentations[i].flatten()
-            gt = array(masks[i]).astype(bool).flatten()
-            if gt.any() or pred.any():
-                IoU.append(jaccard_score(gt, pred))
-
-        tp = sum((binary_preds == True) & (anomaly_labels == True))
-        tn = sum((binary_preds == False) & (anomaly_labels == False))
-        fp = sum((binary_preds == True) & (anomaly_labels == False))
-        fn = sum((binary_preds == False) & (anomaly_labels == True))
-        tpr = tp / (tp + fn)
-        tnr = tn / (tn + fp)
-        bal_acc = (tpr + tnr) / 2
-        mIoU = sum(IoU) / len(IoU)
-
-        return {
-            "tp": tp,
-            "tn": tn,
-            "fp": fp,
-            "fn": fn,
-            "precision": tp / (tp + fp),
-            "tpr_recall": tpr,
-            "tnr": tnr,
-            "bal_acc": bal_acc,
-            "mIoU": mIoU,
-            "performance": (bal_acc + mIoU) / 2,
-        }

@@ -13,18 +13,21 @@ class MVTec(Dataset):
         work_dir: str,
         dataset_dir: str,
         category: str,
-        holdout_ratio: float,
         transform_img: Compose,
         transform_mask: Compose = None,
-        holdout: bool = False,
+        val_ratio: float = None,
     ):
-        self.split = split
         self.transform_img = transform_img
         self.transform_mask = transform_mask
 
         dataset_path = Path(work_dir, dataset_dir)
         category_path = Path(dataset_path, category)
-        split_path = Path(category_path, split if split != "val" else "train")
+
+        if split == "train":
+            split_path = Path(category_path, "train")
+        elif split in {"val", "test"}:
+            split_path = Path(category_path, "test")
+
         subcategories = listdir(split_path)
 
         img_paths = {}
@@ -39,7 +42,7 @@ class MVTec(Dataset):
                 for img in sorted(listdir(subcategory_path))
             ]
 
-            if split == "test" and subcategory != "good":
+            if subcategory != "good":
                 anomaly_mask_path = Path(category_path, "ground_truth", subcategory)
                 mask_paths[subcategory] = [
                     str(Path(anomaly_mask_path, mask))
@@ -51,16 +54,19 @@ class MVTec(Dataset):
             data_tuples = []
             for i, img_path in enumerate(img_paths[subcategory]):
                 data_tuple = [img_path, None]
-                if self.split == "test" and subcategory != "good":
+                if subcategory != "good":
                     data_tuple[1] = mask_paths[subcategory][i]
                 data_tuples.append(data_tuple)
-                
-            split_index = int(holdout_ratio * len(data_tuples))
-            if holdout:
-                data_tuples = data_tuples[split_index:]
-            else:
-                data_tuples = data_tuples[:split_index]
-                
+
+            if val_ratio is not None:
+                split_index = int(val_ratio * len(data_tuples))
+                if split == "val":
+                    data_tuples = data_tuples[:split_index]
+                elif split == "test":
+                    data_tuples = data_tuples[split_index:]
+                else:
+                    raise ValueError("Invalid split")
+
             self.data.extend(data_tuples)
 
     def __len__(self):
@@ -70,7 +76,7 @@ class MVTec(Dataset):
         img_path, mask_path = self.data[idx]
         img = self.transform_img(open(img_path).convert("RGB"))
 
-        if self.split == "test" and mask_path is not None:
+        if mask_path is not None:
             mask = self.transform_mask(open(mask_path))
         else:
             mask = zeros([1, *img.size()[1:]])

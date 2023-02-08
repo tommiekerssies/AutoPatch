@@ -1,7 +1,11 @@
 from argparse import ArgumentParser
 from inspect import signature
+from logging import WARNING, INFO, basicConfig, getLogger, info
+from statistics import mean
 from optuna import create_study
+from torch import set_float32_matmul_precision, sum
 from feature_extractor import FeatureExtractor
+from metrics import lookup_precision_recall
 from mvtec import MVTecDataModule
 from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
@@ -12,13 +16,26 @@ from datetime import datetime
 
 def main(args, trainer_kwargs):
     seed_everything(args.seed, workers=True)
+    set_float32_matmul_precision("medium")
+    getLogger("pytorch_lightning").setLevel(WARNING)
+    basicConfig(level=INFO)
 
-    data_module = MVTecDataModule(
-        work_dir=args.work_dir,
-        dataset_dir=args.dataset_dir,
-        max_img_size=args.max_img_size,
-        batch_size=args.batch_size,
-        val_ratio=args.val_ratio,
+    source_datamodules = [
+        MVTecDataModule(
+            args.dataset_dir,
+            class_,
+            args.max_img_size,
+            args.train_batch_size,
+            args.test_batch_size,
+        )
+        for class_ in args.sources
+    ]
+    target_datamodule = MVTecDataModule(
+        args.dataset_dir,
+        args.target,
+        args.max_img_size,
+        args.train_batch_size,
+        args.test_batch_size,
     )
 
     trainer_kwargs |= dict(
@@ -26,12 +43,10 @@ def main(args, trainer_kwargs):
         logger=False,
         deterministic="warn",
         detect_anomaly=True,
-        max_epochs=args.epochs,
+        max_epochs=1,
     )
 
     def objective(trial):
-        trainer = Trainer(**trainer_kwargs)
-
         supernet_name = trial.suggest_categorical(
             "supernet_name",
             [
@@ -65,40 +80,108 @@ def main(args, trainer_kwargs):
         if not extraction_layers:
             raise RuntimeError("No extraction layers selected")
 
-        patchcore = PatchCore(
-            backbone=FeatureExtractor(supernet, extraction_layers),
-            k_nn=trial.suggest_int("k_nn", 1, 4, step=1),
-            patch_stride=trial.suggest_int("patch_stride", 1, 4, step=1),
-            patch_kernel_size=trial.suggest_int("patch_kernel_size", 1, 6, step=1),
-            patch_channels=trial.suggest_int("patch_channels", 8, 256, step=8),
-            img_size=trial.suggest_int("img_size", 128, args.max_img_size, step=32),
+        backbone = FeatureExtractor(supernet, extraction_layers)
+        k_nn = trial.suggest_int("k_nn", 1, 4, step=1)
+        patch_stride = trial.suggest_int("patch_stride", 1, 4, step=1)
+        patch_kernel_size = trial.suggest_int("patch_kernel_size", 1, 8, step=1)
+        patch_channels = trial.suggest_int("patch_channels", 8, 640, step=8)
+        img_size = trial.suggest_int("img_size", 128, args.max_img_size, step=32)
+        threshold = trial.suggest_float("threshold", 0.0, 1.0)
+
+        min_pred_list = []
+        max_pred_list = []
+        pc_seg_list = []
+        rc_seg_list = []
+        pc_clf_list = []
+        rc_clf_list = []
+        thresholds_seg_list = []
+        thresholds_clf_list = []
+        latency_list = []
+        for datamodule in source_datamodules:
+            info(f"Fitting on source {datamodule.class_}...")
+            patchcore = PatchCore(
+                backbone,
+                k_nn,
+                patch_stride,
+                patch_kernel_size,
+                patch_channels,
+                img_size,
+            )
+            Trainer(**trainer_kwargs).fit(patchcore, datamodule=datamodule)
+
+            min_pred_list.append(patchcore.min_pred.compute().item())
+            max_pred_list.append(patchcore.max_pred.compute().item())
+            seg_pc, seg_rc, seg_thresholds = patchcore.seg_pr_curve.compute()
+            clf_pc, clf_rc, clf_thresholds = patchcore.clf_pr_curve.compute()
+            pc_seg_list.append(seg_pc)
+            rc_seg_list.append(seg_rc)
+            pc_clf_list.append(clf_pc)
+            rc_clf_list.append(clf_rc)
+            thresholds_seg_list.append(seg_thresholds)
+            thresholds_clf_list.append(clf_thresholds)
+            latency_list.append(patchcore.latency.compute().item())
+
+        # Scale the thresholds, as we didn't scale the predictions in the loop (because we didn't know the min and max yet).
+        min_pred = min(min_pred_list)
+        max_pred = max(max_pred_list)
+        for thresholds in thresholds_seg_list + thresholds_clf_list:
+            thresholds -= min_pred
+            thresholds /= max_pred - min_pred
+
+        -sum((recall[1:] - recall[:-1]) * precision[:-1])
+
+        pr_seg_tuples = [
+            lookup_precision_recall(seg_pc, seg_rc, seg_thresholds, threshold)
+            for seg_pc, seg_rc, seg_thresholds in zip(
+                pc_seg_list, rc_seg_list, thresholds_seg_list
+            )
+        ]
+        pr_clf_tuples = [
+            lookup_precision_recall(clf_pc, clf_rc, clf_thresholds, threshold)
+            for clf_pc, clf_rc, clf_thresholds in zip(
+                pc_clf_list, rc_clf_list, thresholds_clf_list
+            )
+        ]
+
+        info(f"Evaluating on target {args.target}...")
+        target_patchcore = PatchCore(
+            backbone,
+            k_nn,
+            patch_stride,
+            patch_kernel_size,
+            patch_channels,
+            img_size,
+            min_pred,
+            max_pred,
+        )
+        Trainer(**trainer_kwargs).fit(target_patchcore, datamodule=target_datamodule)
+
+        target_seg_precision, target_seg_recall = lookup_precision_recall(
+            *target_patchcore.seg_pr_curve.compute(), threshold
+        )
+        target_clf_precision, target_clf_recall = lookup_precision_recall(
+            *target_patchcore.clf_pr_curve.compute(), threshold
+        )
+        trial.set_user_attr("target_seg_precision", target_seg_precision)
+        trial.set_user_attr("target_seg_recall", target_seg_recall)
+        trial.set_user_attr("target_clf_precision", target_clf_precision)
+        trial.set_user_attr("target_clf_recall", target_clf_recall)
+        trial.set_user_attr("target_latency", target_patchcore.latency.compute().item())
+
+        return (
+            mean([precision_seg for precision_seg, _ in pr_seg_tuples]),
+            mean([recall_seg for _, recall_seg in pr_seg_tuples]),
+            mean([precision_clf for precision_clf, _ in pr_clf_tuples]),
+            mean([recall_clf for _, recall_clf in pr_clf_tuples]),
+            mean(latency_list),
         )
 
-        trainer.fit(patchcore, data_module)
-        val_latency = patchcore.latency.compute().item()
-        val_seg_f1 = patchcore.seg_f1.compute().item()
-        val_clf_f1 = patchcore.clf_f1.compute().item()
-        seg_threshold = patchcore.seg_f1.threshold.item()
-        clf_threshold = patchcore.clf_f1.threshold.item()
-
-        trainer.test(patchcore, data_module)
-        test_latency = patchcore.latency.compute().item()
-        test_seg_f1 = patchcore.seg_f1.compute().item()
-        test_clf_f1 = patchcore.clf_f1.compute().item()
-
-        trial.set_user_attr("seg_threshold", seg_threshold)
-        trial.set_user_attr("clf_threshold", clf_threshold)
-        trial.set_user_attr("test_latency", test_latency)
-        trial.set_user_attr("test_seg_f1", test_seg_f1)
-        trial.set_user_attr("test_clf_f1", test_clf_f1)
-
-        return val_latency, val_seg_f1, val_clf_f1
-
     study = create_study(
-        study_name=args.study_name or datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
+        study_name=args.study_name
+        or datetime.now().strftime(f"{args.target}_%Y-%m-%d_%H:%M:%S"),
         load_if_exists=True,
-        directions=["minimize", "maximize", "maximize"],
-        storage=args.db_url,
+        directions=["maximize", "maximize", "maximize", "maximize", "minimize"],
+        storage=args.db_url if args.log else None,
         sampler=NSGAIISampler(seed=args.seed),
     )
     study.optimize(
@@ -112,12 +195,17 @@ if __name__ == "__main__":
     parser.add_argument("--n_trials", type=int)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=267)
-    parser.add_argument("--val_ratio", type=float, default=1.0)
+    parser.add_argument("--train_batch_size", type=int, default=391)
+    parser.add_argument("--test_batch_size", type=int, default=1)
     parser.add_argument("--max_img_size", type=int, default=320)
-    parser.add_argument("--work_dir", type=str, default="/dataB1/tommie_kerssies")
-    parser.add_argument("--dataset_dir", type=str, default="MVTec/pill")
+    parser.add_argument("--log", action="store_true")
+    parser.add_argument(
+        "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
+    )
+    parser.add_argument(
+        "--sources", nargs="+", default=["carpet", "grid", "leather", "wood"]
+    )
+    parser.add_argument("--target", type=str, default="tile")
     parser.add_argument(
         "--db_url",
         type=str,

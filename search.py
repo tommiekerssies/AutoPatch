@@ -1,11 +1,9 @@
 from argparse import ArgumentParser
 from inspect import signature
 from logging import WARNING, INFO, basicConfig, getLogger, info
-from statistics import mean
 from optuna import create_study
-from torch import set_float32_matmul_precision, sum
+from torch import set_float32_matmul_precision
 from feature_extractor import FeatureExtractor
-from metrics import lookup_precision_recall
 from mvtec import MVTecDataModule
 from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
@@ -25,18 +23,21 @@ def main(args, trainer_kwargs):
             args.dataset_dir,
             class_,
             args.max_img_size,
-            args.train_batch_size,
-            args.test_batch_size,
+            args.batch_size,
+            args.seed,
+            args.val_ratio,
         )
         for class_ in args.sources
     ]
-    target_datamodule = MVTecDataModule(
-        args.dataset_dir,
-        args.target,
-        args.max_img_size,
-        args.train_batch_size,
-        args.test_batch_size,
-    )
+    if args.target:
+        target_datamodule = MVTecDataModule(
+            args.dataset_dir,
+            args.target,
+            args.max_img_size,
+            args.batch_size,
+            args.seed,
+            args.val_ratio,
+        )
 
     trainer_kwargs |= dict(
         num_sanity_val_steps=0,
@@ -56,50 +57,98 @@ def main(args, trainer_kwargs):
             ],
         )
         supernet = ofa_net(supernet_name, pretrained=True)
-        supernet.set_active_subnet(
-            ks=trial.suggest_int("subnet_kernel_size", 3, 7, step=2),
-            e=trial.suggest_categorical("subnet_expansion_ratio", [3, 4, 6]),
-            d=trial.suggest_int("subnet_depth", 2, 4, step=1),
+
+        # For each block in the supernet, suggest whether we should extract from it
+        block_extractions = [
+            trial.suggest_categorical(f"block_{block_idx}", [True, False])
+            for block_idx in range(len(supernet.blocks))
+        ]
+
+        # Find the index of the last block we extract from
+        try:
+            last_block_idx = (
+                len(block_extractions) - block_extractions[::-1].index(True) - 1
+            )
+        except ValueError:
+            raise RuntimeError("No extraction blocks selected")
+
+        # Find the index of the last stage we extract from
+        for stage_idx, block_indices in enumerate(supernet.block_group_info[::-1]):
+            if last_block_idx in block_indices:
+                last_stage_idx = stage_idx
+                break
+
+        # For each stage before the last stage we extract from, we will set the depth (number of blocks)
+        stage_depths = []
+        for stage_idx, block_indices in enumerate(supernet.block_group_info):
+            # If this is the last stage we extract from, we're done
+            if stage_idx == last_stage_idx:
+                break
+
+            # Set the minimum and maximum depth
+            stage_min_depth = 2
+            stage_max_depth = len(block_indices)
+
+            # Update the minimum depth if we are extracting if we are extracting a deeper block from this stage
+            for i, block_idx in enumerate(block_indices):
+                if block_extractions[block_idx]:
+                    stage_min_depth = i + 1
+
+            # If the minimum and maximum depth are the same, we don't need to suggest a depth
+            if stage_min_depth == stage_max_depth:
+                stage_depths.append(stage_min_depth)
+
+            # Else we suggest a depth for this stage
+            else:
+                stage_depths.append(
+                    trial.suggest_int(
+                        f"stage_{stage_idx}_depth",
+                        stage_min_depth,
+                        stage_max_depth,
+                        step=1,
+                    )
+                )
+        supernet.set_active_subnet(d=stage_depths)
+
+        kernel_sizes = []
+        expand_ratios = []
+        for block_idx in range(1, last_block_idx + 1):
+            kernel_sizes.append(
+                trial.suggest_int(f"block_{block_idx}_kernel_size", 3, 7, step=2)
+            )
+            expand_ratios.append(
+                trial.suggest_categorical(
+                    f"block_{block_idx}_expansion_ratio", [3, 4, 6]
+                )
+            )
+        supernet.set_active_subnet(ks=kernel_sizes, e=expand_ratios)
+
+        backbone = FeatureExtractor(
+            supernet,
+            [f"blocks.{i}" for i, extract in enumerate(block_extractions) if extract],
         )
 
-        extraction_layers = []
-        for i_stage, block_indices in enumerate(supernet.block_group_info):
-            extract_from_stage = trial.suggest_categorical(
-                f"{supernet_name}_stage_{i_stage}", [True, False]
-            )
-            if extract_from_stage:
-                depth = supernet.runtime_depth[i_stage]
-                i_extract_block = trial.suggest_int(
-                    f"{supernet_name}_stage_{i_stage}_block",
-                    block_indices[0],
-                    block_indices[depth - 1],
-                    step=1,
-                )
-                extraction_layers.append(f"blocks.{i_extract_block}")
-
-        if not extraction_layers:
-            raise RuntimeError("No extraction layers selected")
-
-        backbone = FeatureExtractor(supernet, extraction_layers)
-        k_nn = trial.suggest_int("k_nn", 1, 4, step=1)
-        patch_stride = trial.suggest_int("patch_stride", 1, 4, step=1)
-        patch_kernel_size = trial.suggest_int("patch_kernel_size", 1, 8, step=1)
-        patch_channels = trial.suggest_int("patch_channels", 8, 640, step=8)
+        k_nn = trial.suggest_int("k_nn", 1, 8, step=1)
+        patch_stride = trial.suggest_int("patch_stride", 1, 8, step=1)
+        patch_kernel_size = trial.suggest_int("patch_kernel_size", 1, 16, step=1)
+        patch_channels = trial.suggest_int("patch_channels", 8, 1280, step=8)
         img_size = trial.suggest_int("img_size", 128, args.max_img_size, step=32)
-        threshold = trial.suggest_float("threshold", 0.0, 1.0)
 
-        min_pred_list = []
-        max_pred_list = []
-        pc_seg_list = []
-        rc_seg_list = []
-        pc_clf_list = []
-        rc_clf_list = []
-        thresholds_seg_list = []
-        thresholds_clf_list = []
-        latency_list = []
+        sources_patchcore = PatchCore(
+            backbone, k_nn, patch_stride, patch_kernel_size, patch_channels, img_size
+        )
         for datamodule in source_datamodules:
+            source_trainer = Trainer(**trainer_kwargs)
             info(f"Fitting on source {datamodule.class_}...")
-            patchcore = PatchCore(
+            source_trainer.fit(sources_patchcore, datamodule=datamodule)
+            info(f"Testing on source {datamodule.class_}...")
+            source_trainer.test(sources_patchcore, datamodule=datamodule)
+        sources_latency = sources_patchcore.latency.compute().item()
+        sources_average_precision = sources_patchcore.average_precision.compute().item()
+        del sources_patchcore
+
+        if args.target:
+            target_patchcore = PatchCore(
                 backbone,
                 k_nn,
                 patch_stride,
@@ -107,81 +156,27 @@ def main(args, trainer_kwargs):
                 patch_channels,
                 img_size,
             )
-            Trainer(**trainer_kwargs).fit(patchcore, datamodule=datamodule)
-
-            min_pred_list.append(patchcore.min_pred.compute().item())
-            max_pred_list.append(patchcore.max_pred.compute().item())
-            seg_pc, seg_rc, seg_thresholds = patchcore.seg_pr_curve.compute()
-            clf_pc, clf_rc, clf_thresholds = patchcore.clf_pr_curve.compute()
-            pc_seg_list.append(seg_pc)
-            rc_seg_list.append(seg_rc)
-            pc_clf_list.append(clf_pc)
-            rc_clf_list.append(clf_rc)
-            thresholds_seg_list.append(seg_thresholds)
-            thresholds_clf_list.append(clf_thresholds)
-            latency_list.append(patchcore.latency.compute().item())
-
-        # Scale the thresholds, as we didn't scale the predictions in the loop (because we didn't know the min and max yet).
-        min_pred = min(min_pred_list)
-        max_pred = max(max_pred_list)
-        for thresholds in thresholds_seg_list + thresholds_clf_list:
-            thresholds -= min_pred
-            thresholds /= max_pred - min_pred
-
-        -sum((recall[1:] - recall[:-1]) * precision[:-1])
-
-        pr_seg_tuples = [
-            lookup_precision_recall(seg_pc, seg_rc, seg_thresholds, threshold)
-            for seg_pc, seg_rc, seg_thresholds in zip(
-                pc_seg_list, rc_seg_list, thresholds_seg_list
+            target_trainer = Trainer(**trainer_kwargs)
+            info(f"Fitting on target {args.target}...")
+            target_trainer.fit(target_patchcore, datamodule=target_datamodule)
+            info(f"Testing on target {args.target}...")
+            target_trainer.test(target_patchcore, datamodule=target_datamodule)
+            trial.set_user_attr(
+                "target_latency", target_patchcore.latency.compute().item()
             )
-        ]
-        pr_clf_tuples = [
-            lookup_precision_recall(clf_pc, clf_rc, clf_thresholds, threshold)
-            for clf_pc, clf_rc, clf_thresholds in zip(
-                pc_clf_list, rc_clf_list, thresholds_clf_list
+            trial.set_user_attr(
+                "target_average_precision",
+                target_patchcore.average_precision.compute().item(),
             )
-        ]
 
-        info(f"Evaluating on target {args.target}...")
-        target_patchcore = PatchCore(
-            backbone,
-            k_nn,
-            patch_stride,
-            patch_kernel_size,
-            patch_channels,
-            img_size,
-            min_pred,
-            max_pred,
-        )
-        Trainer(**trainer_kwargs).fit(target_patchcore, datamodule=target_datamodule)
-
-        target_seg_precision, target_seg_recall = lookup_precision_recall(
-            *target_patchcore.seg_pr_curve.compute(), threshold
-        )
-        target_clf_precision, target_clf_recall = lookup_precision_recall(
-            *target_patchcore.clf_pr_curve.compute(), threshold
-        )
-        trial.set_user_attr("target_seg_precision", target_seg_precision)
-        trial.set_user_attr("target_seg_recall", target_seg_recall)
-        trial.set_user_attr("target_clf_precision", target_clf_precision)
-        trial.set_user_attr("target_clf_recall", target_clf_recall)
-        trial.set_user_attr("target_latency", target_patchcore.latency.compute().item())
-
-        return (
-            mean([precision_seg for precision_seg, _ in pr_seg_tuples]),
-            mean([recall_seg for _, recall_seg in pr_seg_tuples]),
-            mean([precision_clf for precision_clf, _ in pr_clf_tuples]),
-            mean([recall_clf for _, recall_clf in pr_clf_tuples]),
-            mean(latency_list),
-        )
+        return [sources_latency, sources_average_precision]
 
     study = create_study(
         study_name=args.study_name
         or datetime.now().strftime(f"{args.target}_%Y-%m-%d_%H:%M:%S"),
         load_if_exists=True,
-        directions=["maximize", "maximize", "maximize", "maximize", "minimize"],
-        storage=args.db_url if args.log else None,
+        directions=["minimize", "maximize"],
+        storage=args.db_url if args.log or args.study_name else None,
         sampler=NSGAIISampler(seed=args.seed),
     )
     study.optimize(
@@ -195,9 +190,9 @@ if __name__ == "__main__":
     parser.add_argument("--n_trials", type=int)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
-    parser.add_argument("--train_batch_size", type=int, default=391)
-    parser.add_argument("--test_batch_size", type=int, default=1)
-    parser.add_argument("--max_img_size", type=int, default=320)
+    parser.add_argument("--batch_size", type=int, default=391)
+    parser.add_argument("--val_ratio", type=float, default=0.1)
+    parser.add_argument("--max_img_size", type=int, default=256)
     parser.add_argument("--log", action="store_true")
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"

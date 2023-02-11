@@ -2,19 +2,12 @@ import faiss.contrib.torch_utils
 from faiss import IndexFlatL2, StandardGpuResources, index_cpu_to_gpu
 from timeit import default_timer
 from pytorch_lightning import LightningModule
-from torch import (
-    Tensor,
-    no_grad,
-    flatten,
-    mean,
-    stack,
-    max as torch_max,
-)
 from torch.nn.functional import adaptive_avg_pool1d, interpolate, avg_pool2d
-from torchmetrics import MaxMetric, MeanMetric, MinMetric
+from torchmetrics import MeanMetric
+from torchmetrics_v1_9_3 import AveragePrecision
 from typing import Tuple
 from feature_extractor import FeatureExtractor
-from metrics import PrecisionRecallCurve
+import torch
 
 
 class PatchCore(LightningModule):
@@ -26,8 +19,6 @@ class PatchCore(LightningModule):
         patch_kernel_size: int,
         patch_channels: int,
         img_size: int,
-        pred_scale_min: float = None,
-        pred_scale_max: float = None,
     ):
         super().__init__()
         self.automatic_optimization = False
@@ -37,19 +28,13 @@ class PatchCore(LightningModule):
         self.patch_stride = patch_stride
         self.patch_channels = patch_channels
         self.img_size = img_size
-        self.pred_scale_min = pred_scale_min
-        self.pred_scale_max = pred_scale_max
-        self.min_pred = MinMetric()
-        self.max_pred = MaxMetric()
         self.latency = MeanMetric()
-        self.seg_pr_curve = PrecisionRecallCurve()
-        self.clf_pr_curve = PrecisionRecallCurve()
+        self.average_precision = AveragePrecision()
         self.search_index = IndexFlatL2(patch_channels)
 
     def on_fit_start(self) -> None:
-        self.trainer.datamodule.train_dataset.to(self.device)
-        self.trainer.datamodule.train_dataset.img_size = self.img_size
-
+        self.trainer.datamodule.to(self.device)
+        self.trainer.datamodule.set_img_size(self.img_size)
         if self.device.type == "cuda" and type(self.search_index) == IndexFlatL2:
             resource = StandardGpuResources()
             resource.noTempMemory()
@@ -57,46 +42,55 @@ class PatchCore(LightningModule):
                 resource, self.device.index, self.search_index
             )
 
-    def on_validation_start(self) -> None:
-        self.trainer.datamodule.val_dataset.to(self.device)
-        self.trainer.datamodule.val_dataset.img_size = self.img_size
-
     def training_step(self, batch, _) -> None:
-        with no_grad():
+        with torch.no_grad():
             x, _ = batch
             patches = self.eval()._patchify(x)
             self.search_index.add(patches)
 
-    def validation_step(self, batch, _) -> Tuple[Tensor, Tensor]:
+    def validation_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
         start_time = default_timer()
+        x, _ = batch
+        y_hat = self(x)
+        self.latency(default_timer() - start_time)
+        return y_hat
+
+    def validation_epoch_end(self, validation_step_outputs):
+        y_hat = torch.cat(validation_step_outputs)
+        self.nominal_score_mean = torch.mean(y_hat)
+        self.nominal_score_std = torch.std(y_hat)
+
+    def test_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute average precision on a test batch (equivalent to area under precision-recall curve)."""
+        # Get y_hat and y, both shape [N, C=1, H, W]
         x, y = batch
         y_hat = self(x)
 
-        self.min_pred(y_hat)
-        self.max_pred(y_hat)
-        self.latency(default_timer() - start_time)
-        self.seg_pr_curve(y_hat, y)
-        self.clf_pr_curve(self._clf(y_hat), self._clf(y))
+        # Convert from pixel-wise to image-wise
+        y_hat = torch.flatten(y_hat, start_dim=-2)  # [N, C=1, H*W]
+        y = torch.flatten(y, start_dim=-2)  # [N, C=1, H*W]
+        y_hat = torch.max(y_hat, dim=-1).values  # [N, C=1]
+        y = torch.max(y, dim=-1).values  # [N, C=1]
 
-        return y_hat, y
+        # Apply z-score normalization based on the mean and std of the validation set
+        y_hat -= self.nominal_score_mean
+        y_hat /= self.nominal_score_std
 
-    def forward(self, x: Tensor) -> Tensor:
+        # Finally, compute the metric
+        self.average_precision(y_hat, y)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Predict the anomaly scores for the patches using the memory bank.
         Args:
             patches: [N*H*W, C=patch_channels]
             batch_size: N
         """
-        # Extract patches from the backbone.
+        # Extract patches from the backbone
         patches = self._patchify(x)  # [N*H*W, C=patch_channels]
 
         # Compute average distance to the k nearest neighbors
         scores, _ = self.search_index.search(patches, k=self.k_nn)  # [N*H*W, K=1]
-        scores = mean(scores, dim=-1)  # [N*H*W]
-
-        # Scale the scores to the predefined minimum and maximum scores if provided
-        if self.pred_scale_min is not None and self.pred_scale_max is not None:
-            scores -= self.pred_scale_min
-            scores /= self.pred_scale_max - self.pred_scale_min
+        scores = torch.mean(scores, dim=-1)  # [N*H*W]
 
         # Reshape the flattened scores to the shape of the original input (x)
         patch_scores = scores.reshape(
@@ -108,7 +102,7 @@ class PatchCore(LightningModule):
             patch_scores, size=self.img_size, mode="bilinear"
         )  # [N, C=1, H=self.img_size, W=self.img_size]
 
-    def _patchify(self, x: Tensor) -> Tensor:
+    def _patchify(self, x: torch.Tensor) -> torch.Tensor:
         """Extracts patches from the backbone.
         Args:
             x: [N, C, H, W]
@@ -143,21 +137,11 @@ class PatchCore(LightningModule):
             )
 
         # Combine the layers into the final patches
-        patches = stack(layer_patches, dim=-1)  # [N*H*W, C, L]
+        patches = torch.stack(layer_patches, dim=-1)  # [N*H*W, C, L]
         patches = patches.flatten(start_dim=-2)  # [N*H*W, C*L]
         return adaptive_avg_pool1d(
             patches, self.patch_channels
         )  # [N*H*W, C=patch_channels]
-
-    @staticmethod
-    def _clf(y: Tensor) -> Tensor:
-        """Clone y and convert it from pixel-wise to image-wise.
-        Args:
-            y: [N, C=1, H, W]
-        """
-        y_clf = y.clone()
-        y_clf = flatten(y_clf, start_dim=-2)  # [N, C=1, H*W]
-        return torch_max(y_clf, dim=-1).values  # [N, C=1]
 
     def configure_optimizers(self):
         pass

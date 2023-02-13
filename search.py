@@ -58,79 +58,67 @@ def main(args, trainer_kwargs):
         )
         supernet = ofa_net(supernet_name, pretrained=True)
 
-        # For each block in the supernet, suggest whether we should extract from it
-        block_extractions = [
+        # For each stage in the supernet, suggest whether we should extract from it
+        stage_extractions = [
             trial.suggest_categorical(
-                f"{supernet_name}_block_{block_idx}", [True, False]
+                f"{supernet_name}_stage_{stage_idx}", [True, False]
             )
-            for block_idx in range(len(supernet.blocks))
+            for stage_idx in range(len(supernet.block_group_info))
         ]
 
-        # Find the index of the last block we extract from
+        # Find the index of the last stage we extract from
         try:
-            last_block_idx = (
-                len(block_extractions) - block_extractions[::-1].index(True) - 1
+            last_stage_idx = (
+                len(supernet.block_group_info) - stage_extractions[::-1].index(True) - 1
             )
         except ValueError:
-            raise RuntimeError("No extraction blocks selected")
+            raise RuntimeError("No extraction stages selected")
 
-        # Find the index of the last stage we extract from
-        for stage_idx, block_indices in enumerate(supernet.block_group_info):
-            if last_block_idx in block_indices:
-                last_stage_idx = stage_idx
-
-        # For each stage before the last stage we extract from, we will set the depth (number of blocks)
         stage_depths = []
+        block_kernel_sizes = []
+        block_expand_ratios = []
+        extraction_layers = []
         for stage_idx, block_indices in enumerate(supernet.block_group_info):
-            # If this is the last stage we extract from, we're done
-            if stage_idx == last_stage_idx:
+            if stage_idx > last_stage_idx:
                 break
 
-            # Set the minimum and maximum depth
             stage_min_depth = 2
             stage_max_depth = len(block_indices)
-
-            # Update the minimum depth if we are extracting a deeper block from this stage
-            for i, block_idx in enumerate(block_indices):
-                if block_extractions[block_idx]:
-                    stage_min_depth = max(stage_min_depth, i + 1)
-
-            # If the minimum and maximum depth are the same, we don't need to suggest a depth
-            if stage_min_depth == stage_max_depth:
-                stage_depths.append(stage_min_depth)
-
-            # Else we suggest a depth for this stage
+            if stage_idx < last_stage_idx:
+                stage_depth = trial.suggest_int(
+                    f"{supernet_name}_stage_{stage_idx}_depth",
+                    stage_min_depth,
+                    stage_max_depth,
+                    step=1,
+                )
+                stage_depths.append(stage_depth)
             else:
-                stage_depths.append(
-                    trial.suggest_int(
-                        f"{supernet_name}_stage_{stage_idx}_depth",
-                        stage_min_depth,
-                        stage_max_depth,
-                        step=1,
-                    )
-                )
-        supernet.set_active_subnet(d=stage_depths)
+                stage_depth = stage_max_depth
 
-        kernel_sizes = []
-        expand_ratios = []
-        for block_idx in range(1, last_block_idx + 1):
-            kernel_sizes.append(
-                trial.suggest_int(
-                    f"{supernet_name}_block_{block_idx}_kernel_size", 3, 7, step=2
+            if stage_extractions[stage_idx]:
+                i_extract_block = trial.suggest_int(
+                    f"{supernet_name}_stage_{stage_idx}_block",
+                    block_indices[0],
+                    block_indices[stage_depth - 1],
+                    step=1,
                 )
-            )
-            expand_ratios.append(
-                trial.suggest_int(
-                    f"{supernet_name}_block_{block_idx}_expansion_ratio", 3, 6, step=1
-                )
-            )
-        supernet.set_active_subnet(ks=kernel_sizes, e=expand_ratios)
+                extraction_layers.append(f"blocks.{i_extract_block}")
 
-        backbone = FeatureExtractor(
-            supernet,
-            [f"blocks.{i}" for i, extract in enumerate(block_extractions) if extract],
+            stage_kernel_size = trial.suggest_int(
+                f"{supernet_name}_stage_{stage_idx}_kernel_size", 3, 7, step=2
+            )
+            block_kernel_sizes.extend([stage_kernel_size] * stage_max_depth)
+
+            stage_expand_ratio = trial.suggest_int(
+                f"{supernet_name}_stage_{stage_idx}_expansion_ratio", 3, 6, step=1
+            )
+            block_expand_ratios.extend([stage_expand_ratio] * stage_max_depth)
+
+        supernet.set_active_subnet(
+            d=stage_depths, ks=block_kernel_sizes, e=block_expand_ratios
         )
 
+        backbone = FeatureExtractor(supernet, extraction_layers)
         k_nn = trial.suggest_int("k_nn", 1, 8, step=1)
         patch_stride = trial.suggest_int("patch_stride", 1, 8, step=1)
         patch_kernel_size = trial.suggest_int("patch_kernel_size", 1, 16, step=1)

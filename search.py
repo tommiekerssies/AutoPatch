@@ -8,7 +8,7 @@ from mvtec import MVTecDataModule
 from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
-from optuna.samplers import NSGAIISampler
+from optuna.samplers import TPESampler
 from datetime import datetime
 
 
@@ -60,7 +60,9 @@ def main(args, trainer_kwargs):
 
         # For each block in the supernet, suggest whether we should extract from it
         block_extractions = [
-            trial.suggest_categorical(f"block_{block_idx}", [True, False])
+            trial.suggest_categorical(
+                f"{supernet_name}_block_{block_idx}", [True, False]
+            )
             for block_idx in range(len(supernet.blocks))
         ]
 
@@ -73,10 +75,9 @@ def main(args, trainer_kwargs):
             raise RuntimeError("No extraction blocks selected")
 
         # Find the index of the last stage we extract from
-        for stage_idx, block_indices in enumerate(supernet.block_group_info[::-1]):
+        for stage_idx, block_indices in enumerate(supernet.block_group_info):
             if last_block_idx in block_indices:
                 last_stage_idx = stage_idx
-                break
 
         # For each stage before the last stage we extract from, we will set the depth (number of blocks)
         stage_depths = []
@@ -89,10 +90,10 @@ def main(args, trainer_kwargs):
             stage_min_depth = 2
             stage_max_depth = len(block_indices)
 
-            # Update the minimum depth if we are extracting if we are extracting a deeper block from this stage
+            # Update the minimum depth if we are extracting a deeper block from this stage
             for i, block_idx in enumerate(block_indices):
                 if block_extractions[block_idx]:
-                    stage_min_depth = i + 1
+                    stage_min_depth = max(stage_min_depth, i + 1)
 
             # If the minimum and maximum depth are the same, we don't need to suggest a depth
             if stage_min_depth == stage_max_depth:
@@ -102,7 +103,7 @@ def main(args, trainer_kwargs):
             else:
                 stage_depths.append(
                     trial.suggest_int(
-                        f"stage_{stage_idx}_depth",
+                        f"{supernet_name}_stage_{stage_idx}_depth",
                         stage_min_depth,
                         stage_max_depth,
                         step=1,
@@ -114,11 +115,13 @@ def main(args, trainer_kwargs):
         expand_ratios = []
         for block_idx in range(1, last_block_idx + 1):
             kernel_sizes.append(
-                trial.suggest_int(f"block_{block_idx}_kernel_size", 3, 7, step=2)
+                trial.suggest_int(
+                    f"{supernet_name}_block_{block_idx}_kernel_size", 3, 7, step=2
+                )
             )
             expand_ratios.append(
-                trial.suggest_categorical(
-                    f"block_{block_idx}_expansion_ratio", [3, 4, 6]
+                trial.suggest_int(
+                    f"{supernet_name}_block_{block_idx}_expansion_ratio", 3, 6, step=1
                 )
             )
         supernet.set_active_subnet(ks=kernel_sizes, e=expand_ratios)
@@ -177,7 +180,7 @@ def main(args, trainer_kwargs):
         load_if_exists=True,
         directions=["minimize", "maximize"],
         storage=args.db_url if args.log or args.study_name else None,
-        sampler=NSGAIISampler(seed=args.seed),
+        sampler=TPESampler(seed=args.seed, multivariate=True, group=True),
     )
     study.optimize(
         objective, n_trials=args.n_trials, n_jobs=args.n_jobs, catch=RuntimeError

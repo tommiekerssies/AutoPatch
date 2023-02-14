@@ -4,49 +4,69 @@ from timeit import default_timer
 from pytorch_lightning import LightningModule
 from torch.nn.functional import adaptive_avg_pool1d, interpolate, avg_pool2d
 from torchmetrics import MeanMetric
+from sampler import ApproximateGreedyCoresetSampler
 from torchmetrics_v1_9_3 import AveragePrecision
 from typing import Tuple
 from feature_extractor import FeatureExtractor
 import torch
+from ofa.imagenet_classification.elastic_nn.networks import OFAMobileNetV3
 
 
 class PatchCore(LightningModule):
     def __init__(
         self,
-        backbone: FeatureExtractor,
-        k_nn: int,
-        patch_stride: int,
-        patch_kernel_size: int,
-        patch_channels: int,
+        supernet: OFAMobileNetV3,
+        stage_depths: list,
+        block_kernel_sizes: list,
+        block_expand_ratios: list,
+        extraction_blocks: list,
         img_size: int,
+        k_nn: int,
+        patch_kernel_size: int,
+        patch_stride: int,
+        final_patch_channels: int,
+        layer_patch_channels: int = None,
+        coreset_ratio: float = None,
     ):
         super().__init__()
         self.automatic_optimization = False
-        self.backbone = backbone
+
+        self.img_size = img_size
         self.k_nn = k_nn
         self.patch_kernel_size = patch_kernel_size
         self.patch_stride = patch_stride
-        self.patch_channels = patch_channels
-        self.img_size = img_size
+        self.layer_patch_channels = layer_patch_channels
+        self.final_patch_channels = final_patch_channels
+
+        supernet.set_active_subnet(
+            d=stage_depths, ks=block_kernel_sizes, e=block_expand_ratios
+        )
+        self.backbone = FeatureExtractor(
+            supernet, [f"blocks.{i}" for i in extraction_blocks]
+        )
+
         self.latency = MeanMetric()
         self.average_precision = AveragePrecision()
-        self.search_index = IndexFlatL2(patch_channels)
+
+        self.sampler = ApproximateGreedyCoresetSampler(ratio=coreset_ratio or 1)
+        self.memory_bank = IndexFlatL2(self.final_patch_channels)
 
     def on_fit_start(self) -> None:
         self.trainer.datamodule.to(self.device)
         self.trainer.datamodule.set_img_size(self.img_size)
-        if self.device.type == "cuda" and type(self.search_index) == IndexFlatL2:
+        if self.device.type == "cuda" and type(self.memory_bank) == IndexFlatL2:
             resource = StandardGpuResources()
             resource.noTempMemory()
-            self.search_index = index_cpu_to_gpu(
-                resource, self.device.index, self.search_index
+            self.memory_bank = index_cpu_to_gpu(
+                resource, self.device.index, self.memory_bank
             )
 
     def training_step(self, batch, _) -> None:
         with torch.no_grad():
             x, _ = batch
             patches = self.eval()._patchify(x)
-            self.search_index.add(patches)
+            patches = self.sampler.run(patches)
+            self.memory_bank.add(patches)
 
     def validation_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
         start_time = default_timer()
@@ -82,14 +102,14 @@ class PatchCore(LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Predict the anomaly scores for the patches using the memory bank.
         Args:
-            patches: [N*H*W, C=patch_channels]
+            patches: [N*H*W, C]
             batch_size: N
         """
         # Extract patches from the backbone
-        patches = self._patchify(x)  # [N*H*W, C=patch_channels]
+        patches = self._patchify(x)  # [N*H*W, C]
 
         # Compute average distance to the k nearest neighbors
-        scores, _ = self.search_index.search(patches, k=self.k_nn)  # [N*H*W, K=1]
+        scores, _ = self.memory_bank.search(patches, k=self.k_nn)  # [N*H*W, K=1]
         scores = torch.mean(scores, dim=-1)  # [N*H*W]
 
         # Reshape the flattened scores to the shape of the original input (x)
@@ -130,18 +150,19 @@ class PatchCore(LightningModule):
             layer_patches[i] = layer_patches[i].permute(0, 2, 3, 1)  # [N, H, W, C]
             layer_patches[i] = layer_patches[i].flatten(end_dim=-2)  # [N*H*W, C]
 
-        # Make sure all layers have the same number of channels as the last layer
-        for i in range(len(layer_patches) - 1):
-            layer_patches[i] = adaptive_avg_pool1d(
-                layer_patches[i], layer_patches[-1].shape[1]
-            )
+        # Make sure all layers have the same number of channels if layer pooling is enabled
+        if self.layer_patch_channels is not None:
+            layer_patches = [
+                adaptive_avg_pool1d(patches, self.layer_patch_channels)
+                for patches in layer_patches
+            ]
 
-        # Combine the layers into the final patches
-        patches = torch.stack(layer_patches, dim=-1)  # [N*H*W, C, L]
-        patches = patches.flatten(start_dim=-2)  # [N*H*W, C*L]
-        return adaptive_avg_pool1d(
-            patches, self.patch_channels
-        )  # [N*H*W, C=patch_channels]
+        # Combine the layers into the final patches and optionally apply final pooling
+        patches = torch.cat(layer_patches, dim=-1)
+        if patches.shape[-1] != self.final_patch_channels:
+            patches = adaptive_avg_pool1d(patches, self.final_patch_channels)
+
+        return patches
 
     def configure_optimizers(self):
         pass

@@ -1,15 +1,13 @@
-from math import ceil
 from typing import Optional
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, Normalize, ToTensor
 from torchvision.transforms.functional import resize
 from os import listdir
-from torch import Generator, device, stack, zeros
+from torch import device, stack, zeros
 from torch.utils.data import Dataset
 from pathlib import Path
 from PIL.Image import open
-from torch.utils.data import random_split
 
 
 class MVTecDataset(Dataset):
@@ -84,32 +82,24 @@ class MVTecDataModule(LightningDataModule):
         class_: str,
         max_img_size: str,
         batch_size: int,
+        test_batch_size: int,
         seed: int,
-        val_ratio: float,
     ):
         super().__init__()
         self.dataset_dir = dataset_dir
         self.class_ = class_
         self.max_img_size = max_img_size
         self.batch_size = batch_size
+        self.test_batch_size = test_batch_size
         self.seed = seed
-        self.val_ratio = val_ratio
 
     def setup(self, stage: Optional[str] = None):
-        if not hasattr(self, "val_dataset") or not hasattr(self, "train_dataset"):
-            self.val_train_dataset = MVTecDataset(
+        if not hasattr(self, "train_dataset"):
+            self.train_dataset = MVTecDataset(
                 self.dataset_dir,
                 self.class_,
                 self.max_img_size,
                 test=False,
-            )
-
-            val_length = ceil(len(self.val_train_dataset) * self.val_ratio)
-            train_length = len(self.val_train_dataset) - val_length
-            self.val_dataset, self.train_dataset = random_split(
-                self.val_train_dataset,
-                lengths=[val_length, train_length],
-                generator=Generator().manual_seed(self.seed),
             )
 
         if not hasattr(self, "test_dataset"):
@@ -122,19 +112,21 @@ class MVTecDataModule(LightningDataModule):
 
         return self
 
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=1)
-
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size)
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.test_batch_size
+            if self.test_batch_size is not None
+            else self.batch_size,
+        )
 
     def to(self, device: device):
-        self.val_train_dataset.to(device)
+        self.train_dataset.to(device)
         self.test_dataset.to(device)
 
     def set_img_size(self, img_size: int):
-        self.val_train_dataset.img_size = img_size
+        self.train_dataset.img_size = img_size
         self.test_dataset.img_size = img_size

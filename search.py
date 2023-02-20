@@ -23,8 +23,8 @@ def main(args, trainer_kwargs):
             class_,
             args.max_img_size,
             args.batch_size,
+            args.test_batch_size,
             args.seed,
-            args.val_ratio,
         )
         for class_ in args.sources
     ]
@@ -34,8 +34,8 @@ def main(args, trainer_kwargs):
             args.target,
             args.max_img_size,
             args.batch_size,
+            args.test_batch_size,
             args.seed,
-            args.val_ratio,
         )
 
     trainer_kwargs |= dict(
@@ -141,8 +141,7 @@ def main(args, trainer_kwargs):
             patchcore_kwargs["final_patch_channels"] = max_final_patch_channels
 
         latencies = []
-        optimal_percentiles = []
-        optimal_f1s = []
+        avg_precisions = []
         for datamodule in source_datamodules:
             trainer = Trainer(**trainer_kwargs)
             patchcore = PatchCore(**patchcore_kwargs)
@@ -151,11 +150,9 @@ def main(args, trainer_kwargs):
             info(f"Testing on source {datamodule.class_}...")
             trainer.test(patchcore, datamodule=datamodule)
             latencies.append(patchcore.latency.compute().item())
-            optimal_percentiles.append(patchcore.optimal_percentile())
-            optimal_f1s.append(patchcore.f1_at_percentile(optimal_percentiles[-1]))
+            avg_precisions.append(patchcore.avg_precision.compute().item())
         trial.set_user_attr("source_latency_mean", mean(latencies))
-        trial.set_user_attr("source_optimal_percentile_mean", mean(optimal_percentiles))
-        trial.set_user_attr("source_optimal_f1_mean", mean(optimal_f1s))
+        trial.set_user_attr("source_avg_precision_mean", mean(avg_precisions))
 
         if args.target:
             trainer = Trainer(**trainer_kwargs)
@@ -166,24 +163,12 @@ def main(args, trainer_kwargs):
             trainer.test(patchcore, datamodule=target_datamodule)
             trial.set_user_attr("target_latency", patchcore.latency.compute().item())
             trial.set_user_attr(
-                "target_optimal_percentile", patchcore.optimal_percentile()
-            )
-            trial.set_user_attr(
-                "target_optimal_f1",
-                patchcore.f1_at_percentile(
-                    trial.user_attrs["target_optimal_percentile"]
-                ),
-            )
-            trial.set_user_attr(
-                "target_f1",
-                patchcore.f1_at_percentile(
-                    trial.user_attrs["source_optimal_percentile_mean"]
-                ),
+                "target_avg_precision", patchcore.avg_precision.compute().item()
             )
 
         return [
             trial.user_attrs["source_latency_mean"],
-            trial.user_attrs["source_optimal_f1_mean"],
+            trial.user_attrs["source_avg_precision_mean"],
         ]
 
     study = create_study(
@@ -205,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=391)
-    parser.add_argument("--val_ratio", type=float, default=0.1)
+    parser.add_argument("--test_batch_size", type=int)
     parser.add_argument("--max_img_size", type=int, default=256)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
@@ -214,23 +199,13 @@ if __name__ == "__main__":
         "--sources",
         nargs="+",
         default=[
-            "bottle",
-            "cable",
-            "capsule",
-            "hazelnut",
-            "metal_nut",
-            "screw",
-            "toothbrush",
-            "transistor",
-            "zipper",
             "wood",
             "carpet",
-            "tile",
             "leather",
             "grid",
         ],
     )
-    parser.add_argument("--target", type=str, default="pill")
+    parser.add_argument("--target", type=str, default="tile")
     parser.add_argument(
         "--db_url",
         type=str,

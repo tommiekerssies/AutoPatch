@@ -1,6 +1,5 @@
 from math import ceil
-from random import shuffle
-from typing import List, Optional, Tuple
+from typing import Optional
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, Normalize, ToTensor

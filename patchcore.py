@@ -1,3 +1,4 @@
+from math import ceil
 import faiss.contrib.torch_utils
 from faiss import IndexFlatL2, StandardGpuResources, index_cpu_to_gpu
 from timeit import default_timer
@@ -5,7 +6,7 @@ from pytorch_lightning import LightningModule
 from torch.nn.functional import adaptive_avg_pool1d, interpolate, avg_pool2d
 from torchmetrics import MeanMetric
 from sampler import ApproximateGreedyCoresetSampler
-from torchmetrics_v1_9_3 import AveragePrecision
+from torchmetrics_v1_9_3 import PrecisionRecallCurve
 from typing import Tuple
 from feature_extractor import FeatureExtractor
 import torch
@@ -46,7 +47,7 @@ class PatchCore(LightningModule):
         )
 
         self.latency = MeanMetric()
-        self.average_precision = AveragePrecision()
+        self.pr_curve = PrecisionRecallCurve()
 
         self.sampler = ApproximateGreedyCoresetSampler(ratio=coreset_ratio or 1)
         self.memory_bank = IndexFlatL2(self.final_patch_channels)
@@ -71,46 +72,30 @@ class PatchCore(LightningModule):
     def validation_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
         start_time = default_timer()
         x, _ = batch
-        y_hat = self(x)
+        patches = self._patchify(x)  # [N*H*W, C]
+        scores = self._score(patches)  # [N*H*W]
         self.latency(default_timer() - start_time)
-        return y_hat
+        return scores
 
     def validation_epoch_end(self, validation_step_outputs):
-        y_hat = torch.cat(validation_step_outputs)
-        self.nominal_score_mean = torch.mean(y_hat)
-        self.nominal_score_std = torch.std(y_hat)
+        self.val_scores = torch.cat(validation_step_outputs).sort().values  # [N*H*W]
 
     def test_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute average precision on a test batch (equivalent to area under precision-recall curve)."""
-        # Get y_hat and y, both shape [N, C=1, H, W]
         x, y = batch
         y_hat = self(x)
+        self.pr_curve(y_hat, y)
 
-        # Convert from pixel-wise to image-wise
-        y_hat = torch.flatten(y_hat, start_dim=-2)  # [N, C=1, H*W]
-        y = torch.flatten(y, start_dim=-2)  # [N, C=1, H*W]
-        y_hat = torch.max(y_hat, dim=-1).values  # [N, C=1]
-        y = torch.max(y, dim=-1).values  # [N, C=1]
+    def test_epoch_end(self, _):
+        (
+            self.precision_curve,
+            self.recall_curve,
+            self.thresholds,
+        ) = self.pr_curve.compute()
 
-        # Apply z-score normalization based on the mean and std of the validation set
-        y_hat -= self.nominal_score_mean
-        y_hat /= self.nominal_score_std
-
-        # Finally, compute the metric
-        self.average_precision(y_hat, y)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Predict the anomaly scores for the patches using the memory bank.
-        Args:
-            patches: [N*H*W, C]
-            batch_size: N
-        """
-        # Extract patches from the backbone
+    def forward(self, x: torch.Tensor):
+        # Get the scores for each patch
         patches = self._patchify(x)  # [N*H*W, C]
-
-        # Compute average distance to the k nearest neighbors
-        scores, _ = self.memory_bank.search(patches, k=self.k_nn)  # [N*H*W, K=1]
-        scores = torch.mean(scores, dim=-1)  # [N*H*W]
+        scores = self._score(patches)  # [N*H*W, C]
 
         # Reshape the flattened scores to the shape of the original input (x)
         patch_scores = scores.reshape(
@@ -163,6 +148,54 @@ class PatchCore(LightningModule):
             patches = adaptive_avg_pool1d(patches, self.final_patch_channels)
 
         return patches
+
+    def _score(self, patches: torch.Tensor) -> torch.Tensor:
+        """Predict the anomaly scores for the patches using the memory bank.
+        Args:
+            patches: [N*H*W, C]
+        """
+        # Find the k nearest neighbor distances for each patch
+        scores, _ = self.memory_bank.search(patches, k=self.k_nn)  # [N*H*W, K=1]
+
+        # Compute mean distance to the k nearest neighbors
+        return torch.mean(scores, dim=-1)  # [N*H*W]
+
+    @staticmethod
+    def _pixel_wise_to_img_wise(y):  # [N, C, H, W]
+        y = torch.flatten(y, start_dim=-2)  # [N, C, H*W]
+        return torch.max(y, dim=-1).values  # [N, C]
+
+    def optimal_percentile(self):
+        denominator = self.precision_curve + self.recall_curve
+        denominator = torch.where(
+            torch.eq(denominator, 0), torch.ones_like(denominator), denominator
+        )
+        f1_scores = 2 * self.precision_curve * self.recall_curve / denominator
+        _, max_f1_idx = torch.max(f1_scores, dim=0)
+        return (
+            self._get_nearest_idx(self.val_scores, self.thresholds[max_f1_idx].item())
+            + 1
+        ) / len(self.val_scores)
+
+    def f1_at_percentile(self, percentile: float):
+        threshold = self.val_scores[ceil(percentile * len(self.val_scores)) - 1]
+        idx = self._get_nearest_idx(self.thresholds, threshold)
+        precision, recall = (
+            self.precision_curve[idx].item(),
+            self.recall_curve[idx].item(),
+        )
+        return 2 * precision * recall / (precision + recall)
+
+    @staticmethod
+    def _get_nearest_idx(one_d_tensor: torch.Tensor, value: float) -> int:
+        idx = (
+            len(one_d_tensor) - 1
+            if one_d_tensor[-1] < value
+            else torch.searchsorted(one_d_tensor, value, right=True)
+        )
+        if one_d_tensor[idx - 1] == value:
+            idx -= 1
+        return idx
 
     def configure_optimizers(self):
         pass

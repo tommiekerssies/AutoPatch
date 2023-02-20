@@ -1,14 +1,14 @@
 from argparse import ArgumentParser
 from inspect import signature
 from logging import WARNING, INFO, basicConfig, getLogger, info
+from statistics import mean
 from optuna import create_study
 from torch import set_float32_matmul_precision
-from feature_extractor import FeatureExtractor
 from mvtec import MVTecDataModule
 from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
-from optuna.samplers import RandomSampler
+from optuna.samplers import NSGAIISampler
 
 
 def main(args, trainer_kwargs):
@@ -140,40 +140,58 @@ def main(args, trainer_kwargs):
         else:
             patchcore_kwargs["final_patch_channels"] = max_final_patch_channels
 
-        sources_patchcore = PatchCore(**patchcore_kwargs)
+        latencies = []
+        optimal_percentiles = []
+        optimal_f1s = []
         for datamodule in source_datamodules:
-            source_trainer = Trainer(**trainer_kwargs)
+            trainer = Trainer(**trainer_kwargs)
+            patchcore = PatchCore(**patchcore_kwargs)
             info(f"Fitting on source {datamodule.class_}...")
-            source_trainer.fit(sources_patchcore, datamodule=datamodule)
+            trainer.fit(patchcore, datamodule=datamodule)
             info(f"Testing on source {datamodule.class_}...")
-            source_trainer.test(sources_patchcore, datamodule=datamodule)
-        sources_latency = sources_patchcore.latency.compute().item()
-        sources_average_precision = sources_patchcore.average_precision.compute().item()
-        del sources_patchcore
+            trainer.test(patchcore, datamodule=datamodule)
+            latencies.append(patchcore.latency.compute().item())
+            optimal_percentiles.append(patchcore.optimal_percentile())
+            optimal_f1s.append(patchcore.f1_at_percentile(optimal_percentiles[-1]))
+        trial.set_user_attr("source_latency_mean", mean(latencies))
+        trial.set_user_attr("source_optimal_percentile_mean", mean(optimal_percentiles))
+        trial.set_user_attr("source_optimal_f1_mean", mean(optimal_f1s))
 
         if args.target:
-            target_patchcore = PatchCore(**patchcore_kwargs)
-            target_trainer = Trainer(**trainer_kwargs)
+            trainer = Trainer(**trainer_kwargs)
+            patchcore = PatchCore(**patchcore_kwargs)
             info(f"Fitting on target {args.target}...")
-            target_trainer.fit(target_patchcore, datamodule=target_datamodule)
+            trainer.fit(patchcore, datamodule=target_datamodule)
             info(f"Testing on target {args.target}...")
-            target_trainer.test(target_patchcore, datamodule=target_datamodule)
+            trainer.test(patchcore, datamodule=target_datamodule)
+            trial.set_user_attr("target_latency", patchcore.latency.compute().item())
             trial.set_user_attr(
-                "target_latency", target_patchcore.latency.compute().item()
+                "target_optimal_percentile", patchcore.optimal_percentile()
             )
             trial.set_user_attr(
-                "target_average_precision",
-                target_patchcore.average_precision.compute().item(),
+                "target_optimal_f1",
+                patchcore.f1_at_percentile(
+                    trial.user_attrs["target_optimal_percentile"]
+                ),
+            )
+            trial.set_user_attr(
+                "target_f1",
+                patchcore.f1_at_percentile(
+                    trial.user_attrs["source_optimal_percentile_mean"]
+                ),
             )
 
-        return [sources_latency, sources_average_precision]
+        return [
+            trial.user_attrs["source_latency_mean"],
+            trial.user_attrs["source_optimal_f1_mean"],
+        ]
 
     study = create_study(
         study_name=args.study_name,
         load_if_exists=True,
         directions=["minimize", "maximize"],
         storage=args.db_url if args.study_name else None,
-        sampler=RandomSampler(),
+        sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
     )
     study.optimize(
         objective, n_trials=args.n_trials, n_jobs=args.n_jobs, catch=RuntimeError
@@ -205,11 +223,11 @@ if __name__ == "__main__":
             "toothbrush",
             "transistor",
             "zipper",
-            # "wood",
-            # "carpet",
-            # "tile",
-            # "leather",
-            # "grid",
+            "wood",
+            "carpet",
+            "tile",
+            "leather",
+            "grid",
         ],
     )
     parser.add_argument("--target", type=str, default="pill")

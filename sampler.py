@@ -1,24 +1,25 @@
-import abc
-from typing import Union
-import numpy as np
 import torch
-import tqdm
+from tqdm import tqdm
+import numpy as np
+from torch.nn import Linear
 
 
 class ApproximateGreedyCoresetSampler:
     def __init__(
         self,
         ratio: float,
-        number_of_starting_points: int = 10,
+        starting_points_ratio: float,
+        mapper,
+        max_sampling_time: int = None,
     ):
         if not 0 < ratio <= 1:
             raise ValueError("ratio value not in (0,1].")
         self.ratio = ratio
-        self.number_of_starting_points = number_of_starting_points
+        self.max_sampling_time = max_sampling_time
+        self.starting_points_ratio = starting_points_ratio
+        self.mapper = mapper
 
-    def run(
-        self, patches: Union[torch.Tensor, np.ndarray]
-    ) -> Union[torch.Tensor, np.ndarray]:
+    def run(self, patches: torch.Tensor) -> torch.Tensor:
         """Subsamples patches using Greedy Coreset.
 
         Args:
@@ -26,7 +27,7 @@ class ApproximateGreedyCoresetSampler:
         """
         if self.ratio == 1:
             return patches
-        sample_indices = self._compute_greedy_coreset_indices(patches)
+        sample_indices = self._compute_greedy_coreset_indices(self.mapper(patches))
         return patches[sample_indices]
 
     @staticmethod
@@ -50,11 +51,9 @@ class ApproximateGreedyCoresetSampler:
         Args:
             patches: [NxD] input feature bank to sample.
         """
-        number_of_starting_points = np.clip(
-            self.number_of_starting_points, None, len(patches)
-        )
+        num_starting_points = int(len(patches) * self.starting_points_ratio)
         start_points = np.random.choice(
-            len(patches), number_of_starting_points, replace=False
+            len(patches), num_starting_points, replace=False
         ).tolist()
 
         approximate_distance_matrix = self._compute_batchwise_differences(
@@ -66,8 +65,13 @@ class ApproximateGreedyCoresetSampler:
         coreset_indices = []
         num_coreset_samples = int(len(patches) * self.ratio)
 
-        with torch.no_grad():
-            for _ in tqdm.tqdm(range(num_coreset_samples), desc="Subsampling..."):
+        with tqdm(range(num_coreset_samples), desc="Subsampling...") as t:
+            for _ in t:
+                if (
+                    self.max_sampling_time is not None
+                    and t.format_dict["elapsed"] > self.max_sampling_time
+                ):
+                    raise RuntimeError("Max sampling time reached")
                 select_idx = torch.argmax(approximate_coreset_anchor_distances).item()
                 coreset_indices.append(select_idx)
                 coreset_select_distance = self._compute_batchwise_differences(
@@ -80,5 +84,7 @@ class ApproximateGreedyCoresetSampler:
                 approximate_coreset_anchor_distances = torch.min(
                     approximate_coreset_anchor_distances, dim=1
                 ).values.reshape(-1, 1)
+
+        self.max_sampling_time = None
 
         return np.array(coreset_indices)

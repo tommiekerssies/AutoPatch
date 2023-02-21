@@ -82,8 +82,7 @@ class MVTecDataModule(LightningDataModule):
         class_: str,
         max_img_size: str,
         batch_size: int,
-        test_batch_size: int,
-        seed: int,
+        test_batch_size: int = None,
     ):
         super().__init__()
         self.dataset_dir = dataset_dir
@@ -91,7 +90,6 @@ class MVTecDataModule(LightningDataModule):
         self.max_img_size = max_img_size
         self.batch_size = batch_size
         self.test_batch_size = test_batch_size
-        self.seed = seed
 
     def setup(self, stage: Optional[str] = None):
         if not hasattr(self, "train_dataset"):

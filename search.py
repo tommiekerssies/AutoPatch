@@ -46,8 +46,6 @@ def objective(
     block_kernel_sizes = []
     block_expand_ratios = []
     patch_kernel_sizes = []
-    train_strides = []
-    test_strides = []
     extraction_blocks = []
     for stage_idx, stage_blocks in enumerate(
         supernet.block_group_info[: last_stage_idx + 1]
@@ -82,45 +80,28 @@ def objective(
             )
             extraction_blocks.append(extraction_block)
 
-            # Determine the patch kernel size and stride for the stage
+            # Determine the patch kernel size for the stage
             patch_kernel_sizes.append(
                 trial.suggest_int(f"stage_{stage_idx}_patch_kernel_size", 1, 8, step=1)
             )
-            train_strides.append(
-                trial.suggest_int(f"stage_{stage_idx}_train_stride", 1, 4, step=1)
-            )
-            test_strides.append(
-                trial.suggest_int(
-                    f"stage_{stage_idx}_test_stride",
-                    1,
-                    train_strides[-1],
-                    step=1,
-                )
-            )
 
+    patch_channels = supernet.blocks[extraction_blocks[-1]].conv.out_channels
+    coreset_ratio = trial.suggest_float("coreset_ratio", 0.0, 1.0)
     patchcore_kwargs = dict(
         supernet=supernet,
         stage_depths=stage_depths,
         block_kernel_sizes=block_kernel_sizes,
         block_expand_ratios=block_expand_ratios,
         extraction_blocks=extraction_blocks,
-        patch_channels=supernet.blocks[extraction_blocks[-1]].conv.out_channels,
         patch_kernel_sizes=patch_kernel_sizes,
-        train_strides=train_strides,
-        test_strides=test_strides,
+        patch_channels=patch_channels,
+        coreset_ratio=coreset_ratio,
         img_size=trial.suggest_int("img_size", 128, max_img_size, step=32),
+        projection_channels=trial.suggest_int("projection_channels", 1, patch_channels),
+        starting_points_ratio=trial.suggest_float(
+            "starting_points_ratio", 0.0, coreset_ratio
+        ),
     )
-
-    if trial.suggest_categorical("make_coreset", [True, False]):
-        patchcore_kwargs["coreset_ratio"] = trial.suggest_float(
-            "coreset_ratio", 0.0, 1.0
-        )
-        patchcore_kwargs["starting_points_ratio"] = trial.suggest_float(
-            "starting_points_ratio", 0.0, patchcore_kwargs["coreset_ratio"]
-        )
-        patchcore_kwargs["projection_channels"] = trial.suggest_int(
-            "projection_channels", 1, patchcore_kwargs["patch_channels"]
-        )
 
     trainer_kwargs |= dict(
         num_sanity_val_steps=0,
@@ -223,8 +204,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_jobs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=391)
     parser.add_argument("--test_batch_size", type=int)
-    parser.add_argument("--max_img_size", type=int, default=256)
-    parser.add_argument("--max_sampling_time", type=int, default=5)
+    parser.add_argument("--max_img_size", type=int, default=224)
+    parser.add_argument("--max_sampling_time", type=int, default=60)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
     )

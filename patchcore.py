@@ -23,11 +23,9 @@ class PatchCore(LightningModule):
         extraction_blocks: list,
         img_size: int,
         patch_kernel_sizes: list,
-        train_strides: list,
-        test_strides: list,
         patch_channels: int,
         max_sampling_time: int = None,
-        coreset_ratio: float = 1.0,
+        coreset_ratio=1.0,
         starting_points_ratio=None,
         projection_channels=None,
     ):
@@ -40,8 +38,6 @@ class PatchCore(LightningModule):
         )
         self.img_size = img_size
         self.patch_kernel_sizes = patch_kernel_sizes
-        self.train_strides = train_strides
-        self.test_strides = test_strides
         self.patch_channels = patch_channels
         self.memory_bank = IndexFlatL2(self.patch_channels)
         if projection_channels is not None:
@@ -71,11 +67,11 @@ class PatchCore(LightningModule):
     def training_step(self, batch, _) -> None:
         with torch.no_grad():
             x, _ = batch
-            patches = self.eval()._patchify(x, training=True)
+            patches = self.eval()._patchify(x)
             patches = self.sampler.run(patches)
             self.memory_bank.add(patches)
 
-    def _patchify(self, x: torch.Tensor, training=False) -> torch.Tensor:
+    def _patchify(self, x: torch.Tensor) -> torch.Tensor:
         # Get feature map from each extraction block
         layer_features = list(self.backbone(x).values())
 
@@ -85,7 +81,7 @@ class PatchCore(LightningModule):
                 z,
                 kernel_size=self.patch_kernel_sizes[i],
                 padding=int((self.patch_kernel_sizes[i] - 1) / 2),
-                stride=self.train_strides[i] if training else self.test_strides[i],
+                stride=1,
             )
             for i, z in enumerate(layer_features)
         ]

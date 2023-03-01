@@ -8,7 +8,18 @@ from mvtec import MVTecDataModule
 from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
-from optuna.samplers import NSGAIISampler
+from feature_extractor import FeatureExtractor
+from optuna.samplers import NSGAIISampler  # , TPESampler
+from deepspeed.profiling.flops_profiler import get_model_profile
+
+
+def run(patchcore, trainer_kwargs, datamodule):
+    trainer = Trainer(**trainer_kwargs)
+    info(f"Fitting on {datamodule.class_}...")
+    trainer.fit(patchcore, datamodule=datamodule)
+    info(f"Testing on {datamodule.class_}...")
+    trainer.test(patchcore, datamodule=datamodule)
+    return patchcore.latency.compute().item(), patchcore.avg_precision.compute().item()
 
 
 def objective(
@@ -82,25 +93,34 @@ def objective(
 
             # Determine the patch kernel size for the stage
             patch_kernel_sizes.append(
-                trial.suggest_int(f"stage_{stage_idx}_patch_kernel_size", 1, 8, step=1)
+                trial.suggest_int(f"stage_{stage_idx}_patch_kernel_size", 1, 16, step=1)
             )
 
-    patch_channels = supernet.blocks[extraction_blocks[-1]].conv.out_channels
-    coreset_ratio = trial.suggest_float("coreset_ratio", 0.0, 1.0)
+    supernet.set_active_subnet(
+        d=stage_depths, ks=block_kernel_sizes, e=block_expand_ratios
+    )
+    feature_extractor = FeatureExtractor(
+        supernet, [f"blocks.{i}" for i in extraction_blocks]
+    )
+    img_size = trial.suggest_int("img_size", 128, max_img_size, step=32)
+
+    flops, macs, params = get_model_profile(
+        feature_extractor,
+        (1, 3, img_size, img_size),
+        print_profile=False,
+        as_string=False
+    )
+    trial.set_user_attr("flops", flops)
+    trial.set_user_attr("macs", macs)
+    trial.set_user_attr("params", params)
+
     patchcore_kwargs = dict(
-        supernet=supernet,
-        stage_depths=stage_depths,
-        block_kernel_sizes=block_kernel_sizes,
-        block_expand_ratios=block_expand_ratios,
-        extraction_blocks=extraction_blocks,
+        backbone=feature_extractor,
         patch_kernel_sizes=patch_kernel_sizes,
-        patch_channels=patch_channels,
-        coreset_ratio=coreset_ratio,
-        img_size=trial.suggest_int("img_size", 128, max_img_size, step=32),
-        projection_channels=trial.suggest_int("projection_channels", 1, patch_channels),
-        starting_points_ratio=trial.suggest_float(
-            "starting_points_ratio", 0.0, coreset_ratio
-        ),
+        img_size=img_size,
+        patch_channels=supernet.blocks[extraction_blocks[-1]].conv.out_channels,
+        # coreset_ratio=trial.suggest_float("coreset_ratio", 0.0, 1.0),
+        # num_starting_points=trial.suggest_int("num_starting_points", 10, 1000, step=10),
     )
 
     trainer_kwargs |= dict(
@@ -111,42 +131,32 @@ def objective(
         max_epochs=1,
     )
 
-    if source_datamodules is not None:
-        latencies = []
-        avg_precisions = []
-        for datamodule in source_datamodules:
-            patchcore = PatchCore(
-                **patchcore_kwargs, max_sampling_time=max_sampling_time
-            )
-            max_sampling_time = None
-            latency, avg_precision = run(patchcore, trainer_kwargs, datamodule)
-            latencies.append(latency)
-            avg_precisions.append(avg_precision)
-        trial.set_user_attr("source_latency_mean", mean(latencies))
-        trial.set_user_attr("source_avg_precision_mean", mean(avg_precisions))
-
     if target_datamodule is not None:
-        patchcore = PatchCore(**patchcore_kwargs)
+        patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
+        max_sampling_time = None
         latency, avg_precision = run(patchcore, trainer_kwargs, target_datamodule)
         trial.set_user_attr("target_latency", latency)
         trial.set_user_attr("target_avg_precision", avg_precision)
 
-        if source_datamodules is None:
-            return patchcore
+    if source_datamodules is None:
+        return patchcore
+
+    latencies = []
+    avg_precisions = []
+    for datamodule in source_datamodules:
+        patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
+        max_sampling_time = None
+        latency, avg_precision = run(patchcore, trainer_kwargs, datamodule)
+        latencies.append(latency)
+        avg_precisions.append(avg_precision)
+    trial.set_user_attr("source_latency_mean", mean(latencies))
+    trial.set_user_attr("source_avg_precision_mean", mean(avg_precisions))
 
     return [
-        trial.user_attrs["source_latency_mean"],
+        # trial.user_attrs["source_latency_mean"],
+        trial.user_attrs["flops"],
         trial.user_attrs["source_avg_precision_mean"],
     ]
-
-
-def run(patchcore, trainer_kwargs, datamodule):
-    trainer = Trainer(**trainer_kwargs)
-    info(f"Fitting on {datamodule.class_}...")
-    trainer.fit(patchcore, datamodule=datamodule)
-    info(f"Testing on {datamodule.class_}...")
-    trainer.test(patchcore, datamodule=datamodule)
-    return patchcore.latency.compute().item(), patchcore.avg_precision.compute().item()
 
 
 def main(args, trainer_kwargs):
@@ -154,6 +164,21 @@ def main(args, trainer_kwargs):
     set_float32_matmul_precision("medium")
     getLogger("pytorch_lightning").setLevel(WARNING)
     basicConfig(level=INFO)
+
+    study = create_study(
+        study_name=args.study_name,
+        load_if_exists=True,
+        directions=["minimize", "maximize"],
+        storage=args.db_url if args.study_name else None,
+        sampler=NSGAIISampler(seed=args.seed),
+        # sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
+        # sampler=TPESampler(
+        #     seed=None if args.study_name else args.seed,
+        #     multivariate=True,
+        #     group=True,
+        #     constant_liar=True,
+        # ),
+    )
 
     source_datamodules = [
         MVTecDataModule(
@@ -174,13 +199,6 @@ def main(args, trainer_kwargs):
             args.test_batch_size,
         )
 
-    study = create_study(
-        study_name=args.study_name,
-        load_if_exists=True,
-        directions=["minimize", "maximize"],
-        storage=args.db_url if args.study_name else None,
-        sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
-    )
     study.optimize(
         lambda trial: objective(
             trial,
@@ -205,7 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=391)
     parser.add_argument("--test_batch_size", type=int)
     parser.add_argument("--max_img_size", type=int, default=224)
-    parser.add_argument("--max_sampling_time", type=int, default=60)
+    parser.add_argument("--max_sampling_time", type=int)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
     )

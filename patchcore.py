@@ -7,52 +7,44 @@ from torchmetrics import MeanMetric
 from sampler import ApproximateGreedyCoresetSampler
 from torchmetrics_v1_9_3 import AveragePrecision
 from typing import Tuple
-from feature_extractor import FeatureExtractor
-import torch
 from ofa.imagenet_classification.elastic_nn.networks import OFAMobileNetV3
-from torch.nn import Linear
+import torch
+from torch.nn import Linear, Module
 
 
 class PatchCore(LightningModule):
     def __init__(
         self,
-        supernet: OFAMobileNetV3,
-        stage_depths: list,
-        block_kernel_sizes: list,
-        block_expand_ratios: list,
-        extraction_blocks: list,
+        backbone: Module,
         img_size: int,
         patch_kernel_sizes: list,
         patch_channels: int,
-        max_sampling_time: int = None,
+        max_sampling_time: int,
         coreset_ratio=1.0,
-        starting_points_ratio=None,
+        num_starting_points: int = 10,
         projection_channels=None,
     ):
         super().__init__()
-        supernet.set_active_subnet(
-            d=stage_depths, ks=block_kernel_sizes, e=block_expand_ratios
-        )
-        self.backbone = FeatureExtractor(
-            supernet, [f"blocks.{i}" for i in extraction_blocks]
-        )
+        self.backbone = backbone
         self.img_size = img_size
         self.patch_kernel_sizes = patch_kernel_sizes
         self.patch_channels = patch_channels
+        self.automatic_optimization = False
         self.memory_bank = IndexFlatL2(self.patch_channels)
+        self.latency = MeanMetric()
+        self.avg_precision = AveragePrecision()
+
         if projection_channels is not None:
             self.mapper = Linear(patch_channels, projection_channels, bias=False)
         else:
             self.mapper = lambda x: x
+
         self.sampler = ApproximateGreedyCoresetSampler(
             ratio=coreset_ratio,
-            max_sampling_time=max_sampling_time,
-            starting_points_ratio=starting_points_ratio,
+            num_starting_points=num_starting_points,
             mapper=self.mapper,
+            max_sampling_time=max_sampling_time,
         )
-        self.latency = MeanMetric()
-        self.avg_precision = AveragePrecision()
-        self.automatic_optimization = False
 
     def on_fit_start(self) -> None:
         self.trainer.datamodule.to(self.device)

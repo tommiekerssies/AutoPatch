@@ -8,16 +8,16 @@ class ApproximateGreedyCoresetSampler:
     def __init__(
         self,
         ratio: float,
-        starting_points_ratio: float,
-        mapper,
-        max_sampling_time: int = None,
+        num_starting_points: int,
+        mapper: Linear,
+        max_sampling_time: int,
     ):
         if not 0 < ratio <= 1:
             raise ValueError("ratio value not in (0,1].")
         self.ratio = ratio
-        self.max_sampling_time = max_sampling_time
-        self.starting_points_ratio = starting_points_ratio
+        self.num_starting_points = num_starting_points
         self.mapper = mapper
+        self.max_sampling_time = max_sampling_time
 
     def run(self, patches: torch.Tensor) -> torch.Tensor:
         """Subsamples patches using Greedy Coreset.
@@ -51,9 +51,8 @@ class ApproximateGreedyCoresetSampler:
         Args:
             patches: [NxD] input feature bank to sample.
         """
-        num_starting_points = int(len(patches) * self.starting_points_ratio)
         start_points = np.random.choice(
-            len(patches), num_starting_points, replace=False
+            len(patches), self.num_starting_points, replace=False
         ).tolist()
 
         approximate_distance_matrix = self._compute_batchwise_differences(
@@ -84,7 +83,5 @@ class ApproximateGreedyCoresetSampler:
                 approximate_coreset_anchor_distances = torch.min(
                     approximate_coreset_anchor_distances, dim=1
                 ).values.reshape(-1, 1)
-
-        self.max_sampling_time = None
 
         return np.array(coreset_indices)

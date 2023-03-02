@@ -37,8 +37,8 @@ class MVTecDataset(Dataset):
             )
 
         transforms = [
-            Resize(max_img_size),
             ToTensor(),
+            Resize(max_img_size, antialias=True),
         ]
         transform_img = Compose(
             transforms
@@ -51,9 +51,9 @@ class MVTecDataset(Dataset):
         for img_path, mask_path in img_mask_pairs:
             imgs.append(transform_img(open(img_path).convert("RGB")))
             masks.append(
-                transform_mask(open(mask_path)).int()
+                transform_mask(open(mask_path))
                 if mask_path is not None
-                else zeros([1, *imgs[-1].size()[1:]], dtype=int)
+                else zeros([1, *imgs[-1].size()[1:]])
             )
 
         self.imgs = stack(imgs)
@@ -66,8 +66,8 @@ class MVTecDataset(Dataset):
     def __getitem__(self, i: int):
         img, mask = self.imgs[i], self.masks[i]
         if self.img_size != img.shape[-1]:
-            img = resize(img, self.img_size)
-            mask = resize(mask, self.img_size)
+            img = resize(img, self.img_size, antialias=True)
+            mask = resize(mask, self.img_size, antialias=True)
         return img, mask
 
     def to(self, device: device):

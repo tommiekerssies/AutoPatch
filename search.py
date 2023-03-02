@@ -9,7 +9,7 @@ from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
 from feature_extractor import FeatureExtractor
-from optuna.samplers import NSGAIISampler  # , TPESampler
+from optuna.samplers import TPESampler
 from deepspeed.profiling.flops_profiler import get_model_profile
 
 
@@ -19,7 +19,10 @@ def run(patchcore, trainer_kwargs, datamodule):
     trainer.fit(patchcore, datamodule=datamodule)
     info(f"Testing on {datamodule.class_}...")
     trainer.test(patchcore, datamodule=datamodule)
-    return patchcore.latency.compute().item(), patchcore.avg_precision.compute().item()
+    return (
+        patchcore.latency.compute().item(),
+        patchcore.region_weighted_avg_precision.item(),
+    )
 
 
 def objective(
@@ -108,7 +111,7 @@ def objective(
         feature_extractor,
         (1, 3, img_size, img_size),
         print_profile=False,
-        as_string=False
+        as_string=False,
     )
     trial.set_user_attr("flops", flops)
     trial.set_user_attr("macs", macs)
@@ -134,28 +137,37 @@ def objective(
     if target_datamodule is not None:
         patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
         max_sampling_time = None
-        latency, avg_precision = run(patchcore, trainer_kwargs, target_datamodule)
+        latency, region_weighted_avg_precision = run(
+            patchcore, trainer_kwargs, target_datamodule
+        )
         trial.set_user_attr("target_latency", latency)
-        trial.set_user_attr("target_avg_precision", avg_precision)
+        trial.set_user_attr(
+            "target_region_weighted_avg_precision", region_weighted_avg_precision
+        )
 
     if source_datamodules is None:
         return patchcore
 
     latencies = []
-    avg_precisions = []
+    region_weighted_avg_precisions = []
     for datamodule in source_datamodules:
         patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
         max_sampling_time = None
-        latency, avg_precision = run(patchcore, trainer_kwargs, datamodule)
+        latency, region_weighted_avg_precision = run(
+            patchcore, trainer_kwargs, datamodule
+        )
         latencies.append(latency)
-        avg_precisions.append(avg_precision)
+        region_weighted_avg_precisions.append(region_weighted_avg_precision)
     trial.set_user_attr("source_latency_mean", mean(latencies))
-    trial.set_user_attr("source_avg_precision_mean", mean(avg_precisions))
+    trial.set_user_attr(
+        "source_region_weighted_avg_precision_mean",
+        mean(region_weighted_avg_precisions),
+    )
 
     return [
         # trial.user_attrs["source_latency_mean"],
         trial.user_attrs["flops"],
-        trial.user_attrs["source_avg_precision_mean"],
+        trial.user_attrs["source_region_weighted_avg_precision_mean"],
     ]
 
 
@@ -170,14 +182,12 @@ def main(args, trainer_kwargs):
         load_if_exists=True,
         directions=["minimize", "maximize"],
         storage=args.db_url if args.study_name else None,
-        sampler=NSGAIISampler(seed=args.seed),
-        # sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
-        # sampler=TPESampler(
-        #     seed=None if args.study_name else args.seed,
-        #     multivariate=True,
-        #     group=True,
-        #     constant_liar=True,
-        # ),
+        sampler=TPESampler(
+            seed=None if args.study_name else args.seed,
+            multivariate=True,
+            group=True,
+            constant_liar=True,
+        ),
     )
 
     source_datamodules = [

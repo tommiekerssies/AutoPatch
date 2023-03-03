@@ -47,16 +47,11 @@ def objective(
     block_expand_ratios = {}
     block_patch_sizes = {}
     block_patch_pooling = {}
+
     for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
         stage_depths[stage_idx] = 2
 
-        for i, block in enumerate(stage_blocks):
-            block_extract[block] = trial.suggest_categorical(
-                f"block_{block}_extract", [True, False]
-            )
-            if block_extract[block] and (i + 1) > stage_depths[stage_idx]:
-                stage_depths[stage_idx] = i + 1
-
+        for block_idx, block in enumerate(stage_blocks):
             block_kernel_sizes[block] = trial.suggest_int(
                 f"block_{block}_kernel_size", 3, 7, step=2
             )
@@ -64,12 +59,19 @@ def objective(
                 f"block_{block}_expand_ratio", [3, 4, 6]
             )
 
-            block_patch_sizes[block] = trial.suggest_int(
-                f"block_{block}_patch_size", 1, 16, step=1
-            )
-            block_patch_pooling[block] = trial.suggest_categorical(
-                f"block_{block}_patch_pooling", [0.125, 0.25, 0.5, 1]
-            )
+            if stage_idx != 0:
+                block_extract[block] = trial.suggest_categorical(
+                    f"block_{block}_extract", [True, False]
+                )
+                block_patch_sizes[block] = trial.suggest_int(
+                    f"block_{block}_patch_size", 1, 16, step=1
+                )
+                block_patch_pooling[block] = trial.suggest_categorical(
+                    f"block_{block}_patch_pooling", [0.125, 0.25, 0.5, 1]
+                )
+
+            if block in block_extract and block_extract[block]:
+                stage_depths[stage_idx] = max(stage_depths[stage_idx], block_idx + 1)
 
     supernet.set_active_subnet(
         d=list(stage_depths.values()),

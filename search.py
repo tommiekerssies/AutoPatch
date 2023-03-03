@@ -42,44 +42,46 @@ def objective(
     )
 
     stage_depths = {}
-    block_extract = {}
-    block_kernel_sizes = {}
-    block_expand_ratios = {}
-    block_patch_sizes = {}
-    block_patch_pooling = {}
+    stage_block = {}
+    stage_kernel_size = {}
+    stage_expand_ratio = {}
+    stage_patch_size = {}
+    stage_patch_channel_ratio = {}
 
     for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
+        stage_kernel_size[stage_idx] = trial.suggest_int(
+            f"stage_{stage_idx}_kernel_size", 3, 7, step=2
+        )
+        stage_expand_ratio[stage_idx] = trial.suggest_categorical(
+            f"stage_{stage_idx}_expand_ratio", [3, 4, 6]
+        )
+
+        if stage_idx != 0:
+            stage_patch_size[stage_idx] = trial.suggest_int(
+                f"stage_{stage_idx}_patch_size", 1, 16, step=1
+            )
+            stage_patch_channel_ratio[stage_idx] = trial.suggest_categorical(
+                f"stage_{stage_idx}_patch_channel_ratio", [0.125, 0.25, 0.5, 1]
+            )
+            stage_block[stage_idx] = trial.suggest_categorical(
+                f"stage_{stage_idx}_block", [None, *stage_blocks]
+            )
+
         stage_depths[stage_idx] = 2
-
-        for block_idx, block in enumerate(stage_blocks):
-            block_kernel_sizes[block] = trial.suggest_int(
-                f"block_{block}_kernel_size", 3, 7, step=2
-            )
-            block_expand_ratios[block] = trial.suggest_categorical(
-                f"block_{block}_expand_ratio", [3, 4, 6]
+        if stage_idx in stage_block and stage_block[stage_idx] is not None:
+            stage_depths[stage_idx] = max(
+                stage_depths[stage_idx], stage_blocks.index(stage_block[stage_idx]) + 1
             )
 
-            if stage_idx != 0:
-                block_extract[block] = trial.suggest_categorical(
-                    f"block_{block}_extract", [True, False]
-                )
-                block_patch_sizes[block] = trial.suggest_int(
-                    f"block_{block}_patch_size", 1, 16, step=1
-                )
-                block_patch_pooling[block] = trial.suggest_categorical(
-                    f"block_{block}_patch_pooling", [0.125, 0.25, 0.5, 1]
-                )
+    ks = []
+    e = []
+    for stage_idx, kernel_size in stage_kernel_size.items():
+        ks.extend(kernel_size for _ in range(len(supernet.block_group_info[stage_idx])))
+    for stage_idx, expand_ratio in stage_expand_ratio.items():
+        e.extend(expand_ratio for _ in range(len(supernet.block_group_info[stage_idx])))
+    supernet.set_active_subnet(ks, e, list(stage_depths.values()))
 
-            if block in block_extract and block_extract[block]:
-                stage_depths[stage_idx] = max(stage_depths[stage_idx], block_idx + 1)
-
-    supernet.set_active_subnet(
-        d=list(stage_depths.values()),
-        ks=list(block_kernel_sizes.values()),
-        e=list(block_expand_ratios.values()),
-    )
-
-    extraction_blocks = [block for block, extract in block_extract.items() if extract]
+    extraction_blocks = [block for block in stage_block.values() if block is not None]
     if not extraction_blocks:
         raise RuntimeError("No blocks selected for extraction.")
 
@@ -96,15 +98,17 @@ def objective(
     trial.set_user_attr("flops", flops)
     trial.set_user_attr("macs", macs)
 
-    patchcore_kwargs = dict(
-        backbone=feature_extractor,
-        img_size=img_size,
-        patch_sizes=[block_patch_sizes[block] for block in extraction_blocks],
-        patch_channels=[
-            int(block_patch_pooling[block] * supernet.blocks[block].conv.out_channels)
-            for block in extraction_blocks
-        ],
-    )
+    patch_sizes = [
+        patch_size
+        for stage_idx, patch_size in stage_patch_size.items()
+        if stage_idx in stage_block and stage_block[stage_idx] is not None
+    ]
+
+    patch_channels = []
+    for stage_idx, channel_ratio in stage_patch_channel_ratio.items():
+        if stage_idx in stage_block and stage_block[stage_idx] is not None:
+            channels = supernet.blocks[stage_block[stage_idx]].conv.out_channels
+            patch_channels.append(int(channel_ratio * channels))
 
     trainer_kwargs |= dict(
         num_sanity_val_steps=0,
@@ -115,7 +119,13 @@ def objective(
     )
 
     if target_datamodule is not None:
-        patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
+        patchcore = PatchCore(
+            feature_extractor,
+            img_size,
+            patch_sizes,
+            patch_channels,
+            max_sampling_time=max_sampling_time,
+        )
         max_sampling_time = None
         latency, region_weighted_avg_precision = run(
             patchcore, trainer_kwargs, target_datamodule
@@ -131,13 +141,20 @@ def objective(
     latencies = []
     region_weighted_avg_precisions = []
     for datamodule in source_datamodules:
-        patchcore = PatchCore(**patchcore_kwargs, max_sampling_time=max_sampling_time)
+        patchcore = PatchCore(
+            feature_extractor,
+            img_size,
+            patch_sizes,
+            patch_channels,
+            max_sampling_time=max_sampling_time,
+        )
         max_sampling_time = None
         latency, region_weighted_avg_precision = run(
             patchcore, trainer_kwargs, datamodule
         )
         latencies.append(latency)
         region_weighted_avg_precisions.append(region_weighted_avg_precision)
+
     trial.set_user_attr("source_latency_mean", mean(latencies))
     trial.set_user_attr(
         "source_region_weighted_avg_precision_mean",

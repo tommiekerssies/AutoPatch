@@ -68,7 +68,7 @@ class PatchCore(LightningModule):
                 stride=1,
             )
 
-            # If necessary, upsample the patch resolution to the maximum patch resolution
+            # If necessary, upsample the patches to the maximum patch resolution
             patches = interpolate(patches, size=self.patch_resolution, mode="bilinear")
 
             # Flatten the patches

@@ -42,27 +42,35 @@ def objective(
     )
 
     stage_depths = {}
+    block_extract = {}
     block_kernel_sizes = {}
     block_expand_ratios = {}
-    block_extract = {}
     block_patch_sizes = {}
+    block_patch_pooling = {}
     for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
-        stage_depths[stage_idx] = trial.suggest_int(
-            f"stage_{stage_idx}_depth", 2, len(stage_blocks)
-        )
-        for block in stage_blocks:
+        stage_depths[stage_idx] = 2
+
+        for i, block in enumerate(stage_blocks):
             block_extract[block] = trial.suggest_categorical(
                 f"block_{block}_extract", [True, False]
             )
+            if block_extract[block] and (i + 1) > stage_depths[stage_idx]:
+                stage_depths[stage_idx] = i + 1
+
             block_kernel_sizes[block] = trial.suggest_int(
                 f"block_{block}_kernel_size", 3, 7, step=2
             )
             block_expand_ratios[block] = trial.suggest_categorical(
                 f"block_{block}_expand_ratio", [3, 4, 6]
             )
+
             block_patch_sizes[block] = trial.suggest_int(
                 f"block_{block}_patch_size", 1, 16, step=1
             )
+            block_patch_pooling[block] = trial.suggest_categorical(
+                f"block_{block}_patch_pooling", [0.125, 0.25, 0.5, 1]
+            )
+
     supernet.set_active_subnet(
         d=list(stage_depths.values()),
         ks=list(block_kernel_sizes.values()),
@@ -88,11 +96,12 @@ def objective(
 
     patchcore_kwargs = dict(
         backbone=feature_extractor,
-        patch_sizes=[block_patch_sizes[block] for block in extraction_blocks],
         img_size=img_size,
-        patch_channels=supernet.blocks[extraction_blocks[-1]].conv.out_channels,
-        # coreset_ratio=trial.suggest_float("coreset_ratio", 0.0, 1.0),
-        # num_starting_points=trial.suggest_int("num_starting_points", 10, 1000, step=10),
+        patch_sizes=[block_patch_sizes[block] for block in extraction_blocks],
+        patch_channels=[
+            int(block_patch_pooling[block] * supernet.blocks[block].conv.out_channels)
+            for block in extraction_blocks
+        ],
     )
 
     trainer_kwargs |= dict(
@@ -134,7 +143,6 @@ def objective(
     )
 
     return [
-        # trial.user_attrs["source_latency_mean"],
         trial.user_attrs["flops"],
         trial.user_attrs["source_region_weighted_avg_precision_mean"],
     ]
@@ -151,7 +159,6 @@ def main(args, trainer_kwargs):
         load_if_exists=True,
         directions=["minimize", "maximize"],
         storage=args.db_url if args.study_name else None,
-        # sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
         sampler=TPESampler(
             seed=None if args.study_name else args.seed,
             multivariate=True,
@@ -206,17 +213,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
     )
-    parser.add_argument(
-        "--sources",
-        nargs="+",
-        default=[
-            "wood",
-            "carpet",
-            "leather",
-            "grid",
-        ],
-    )
-    parser.add_argument("--target", type=str, default="tile")
+    parser.add_argument("--sources", nargs="+")
+    parser.add_argument("--target", type=str)
     parser.add_argument(
         "--db_url",
         type=str,

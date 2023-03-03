@@ -18,7 +18,7 @@ class PatchCore(LightningModule):
         self,
         backbone: Module,
         img_size: int,
-        patch_kernel_sizes: list,
+        patch_sizes: list,
         patch_channels: int,
         max_sampling_time: int,
         coreset_ratio=1.0,
@@ -28,7 +28,7 @@ class PatchCore(LightningModule):
         super().__init__()
         self.backbone = backbone
         self.img_size = img_size
-        self.patch_kernel_sizes = patch_kernel_sizes
+        self.patch_sizes = patch_sizes
         self.patch_channels = patch_channels
         self.automatic_optimization = False
         self.memory_bank = IndexFlatL2(self.patch_channels)
@@ -50,12 +50,15 @@ class PatchCore(LightningModule):
         # Get feature map from each extraction block
         layer_features = list(self.backbone(x).values())
 
+        if not layer_features:
+            raise ValueError("No feature maps were extracted from the backbone")
+
         # Extract patches from each feature map
         layer_patches = [
             avg_pool2d(
                 z,
-                kernel_size=self.patch_kernel_sizes[i],
-                padding=int((self.patch_kernel_sizes[i] - 1) / 2),
+                kernel_size=self.patch_sizes[i],
+                padding=int((self.patch_sizes[i] - 1) / 2),
                 stride=1,
             )
             for i, z in enumerate(layer_features)

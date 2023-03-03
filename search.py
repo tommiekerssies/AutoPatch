@@ -9,7 +9,7 @@ from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
 from feature_extractor import FeatureExtractor
-from optuna.samplers import TPESampler
+from optuna.samplers import TPESampler, NSGAIISampler
 from deepspeed.profiling.flops_profiler import get_model_profile
 
 
@@ -41,73 +41,43 @@ def objective(
         pretrained=True,
     )
 
-    # Determine whether to extract from each stage in the supernet
-    stage_extractions = [
-        trial.suggest_categorical(f"stage_{i}", [True, False])
-        for i in range(len(supernet.block_group_info))
-    ]
-
-    if not any(stage_extractions):
-        raise RuntimeError("No stages selected for extraction.")
-
-    # Find the index of the last stage to extract from
-    last_stage_idx = (
-        len(supernet.block_group_info) - stage_extractions[::-1].index(True) - 1
-    )
-
-    # Store the depth, kernel size, and expansion ratio for each stage
-    stage_depths = []
-    block_kernel_sizes = []
-    block_expand_ratios = []
-    patch_kernel_sizes = []
-    extraction_blocks = []
-    for stage_idx, stage_blocks in enumerate(
-        supernet.block_group_info[: last_stage_idx + 1]
-    ):
-        # Determine the block kernel size and expansion ratio for the stage
-        block_kernel_size = trial.suggest_int(
-            f"stage_{stage_idx}_block_kernel_size", 3, 7, step=2
+    stage_depths = {}
+    block_kernel_sizes = {}
+    block_expand_ratios = {}
+    block_extract = {}
+    block_patch_sizes = {}
+    for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
+        stage_depths[stage_idx] = trial.suggest_int(
+            f"stage_{stage_idx}_depth", 2, len(stage_blocks)
         )
-        block_kernel_sizes.extend([block_kernel_size] * len(stage_blocks))
-        expand_ratio = trial.suggest_categorical(
-            f"stage_{stage_idx}_expand_ratio", [3, 4, 6]
-        )
-        block_expand_ratios.extend([expand_ratio] * len(stage_blocks))
-
-        # Determine the depth of the stage
-        stage_depth = (
-            len(stage_blocks)
-            if stage_idx == last_stage_idx
-            else trial.suggest_int(
-                f"stage_{stage_idx}_depth", 2, len(stage_blocks), step=1
+        for block in stage_blocks:
+            block_extract[block] = trial.suggest_categorical(
+                f"block_{block}_extract", [True, False]
             )
-        )
-        stage_depths.append(stage_depth)
-
-        if stage_extractions[stage_idx]:
-            # Determine the layer to extract from the stage
-            extraction_block = trial.suggest_int(
-                f"stage_{stage_idx}_block",
-                stage_blocks[0],
-                stage_blocks[stage_depth - 1],
-                step=1,
+            block_kernel_sizes[block] = trial.suggest_int(
+                f"block_{block}_kernel_size", 3, 7, step=2
             )
-            extraction_blocks.append(extraction_block)
-
-            # Determine the patch kernel size for the stage
-            patch_kernel_sizes.append(
-                trial.suggest_int(f"stage_{stage_idx}_patch_kernel_size", 1, 16, step=1)
+            block_expand_ratios[block] = trial.suggest_categorical(
+                f"block_{block}_expand_ratio", [3, 4, 6]
             )
-
+            block_patch_sizes[block] = trial.suggest_int(
+                f"block_{block}_patch_size", 1, 16, step=1
+            )
     supernet.set_active_subnet(
-        d=stage_depths, ks=block_kernel_sizes, e=block_expand_ratios
+        d=list(stage_depths.values()),
+        ks=list(block_kernel_sizes.values()),
+        e=list(block_expand_ratios.values()),
     )
+
+    extraction_blocks = [block for block, extract in block_extract.items() if extract]
+    if not extraction_blocks:
+        raise RuntimeError("No blocks selected for extraction.")
+
     feature_extractor = FeatureExtractor(
-        supernet, [f"blocks.{i}" for i in extraction_blocks]
+        supernet, [f"blocks.{block}" for block in extraction_blocks]
     )
     img_size = trial.suggest_int("img_size", 128, max_img_size, step=32)
-
-    flops, macs, params = get_model_profile(
+    flops, macs, _ = get_model_profile(
         feature_extractor,
         (1, 3, img_size, img_size),
         print_profile=False,
@@ -115,11 +85,10 @@ def objective(
     )
     trial.set_user_attr("flops", flops)
     trial.set_user_attr("macs", macs)
-    trial.set_user_attr("params", params)
 
     patchcore_kwargs = dict(
         backbone=feature_extractor,
-        patch_kernel_sizes=patch_kernel_sizes,
+        patch_sizes=[block_patch_sizes[block] for block in extraction_blocks],
         img_size=img_size,
         patch_channels=supernet.blocks[extraction_blocks[-1]].conv.out_channels,
         # coreset_ratio=trial.suggest_float("coreset_ratio", 0.0, 1.0),
@@ -182,10 +151,10 @@ def main(args, trainer_kwargs):
         load_if_exists=True,
         directions=["minimize", "maximize"],
         storage=args.db_url if args.study_name else None,
+        # sampler=NSGAIISampler(seed=None if args.study_name else args.seed),
         sampler=TPESampler(
             seed=None if args.study_name else args.seed,
             multivariate=True,
-            group=True,
             constant_liar=True,
         ),
     )

@@ -9,7 +9,7 @@ from patchcore import PatchCore
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
 from feature_extractor import FeatureExtractor
-from optuna.samplers import TPESampler, NSGAIISampler
+from optuna.samplers import TPESampler
 from deepspeed.profiling.flops_profiler import get_model_profile
 
 
@@ -46,7 +46,6 @@ def objective(
     stage_kernel_size = {}
     stage_expand_ratio = {}
     stage_patch_size = {}
-    stage_patch_channel_ratio = {}
 
     for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
         stage_kernel_size[stage_idx] = trial.suggest_int(
@@ -55,17 +54,12 @@ def objective(
         stage_expand_ratio[stage_idx] = trial.suggest_categorical(
             f"stage_{stage_idx}_expand_ratio", [3, 4, 6]
         )
-
-        if stage_idx != 0:
-            stage_patch_size[stage_idx] = trial.suggest_int(
-                f"stage_{stage_idx}_patch_size", 1, 16, step=1
-            )
-            stage_patch_channel_ratio[stage_idx] = trial.suggest_categorical(
-                f"stage_{stage_idx}_patch_channel_ratio", [0.125, 0.25, 0.5, 1]
-            )
-            stage_block[stage_idx] = trial.suggest_categorical(
-                f"stage_{stage_idx}_block", [None, *stage_blocks]
-            )
+        stage_patch_size[stage_idx] = trial.suggest_int(
+            f"stage_{stage_idx}_patch_size", 1, 16, step=1
+        )
+        stage_block[stage_idx] = trial.suggest_categorical(
+            f"stage_{stage_idx}_block", [None, *stage_blocks]
+        )
 
         stage_depths[stage_idx] = 2
         if stage_idx in stage_block and stage_block[stage_idx] is not None:
@@ -103,12 +97,7 @@ def objective(
         for stage_idx, patch_size in stage_patch_size.items()
         if stage_idx in stage_block and stage_block[stage_idx] is not None
     ]
-
-    patch_channels = []
-    for stage_idx, channel_ratio in stage_patch_channel_ratio.items():
-        if stage_idx in stage_block and stage_block[stage_idx] is not None:
-            channels = supernet.blocks[stage_block[stage_idx]].conv.out_channels
-            patch_channels.append(int(channel_ratio * channels))
+    patch_channels = supernet.blocks[extraction_blocks[-1]].conv.out_channels
 
     trainer_kwargs |= dict(
         num_sanity_val_steps=0,

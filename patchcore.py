@@ -19,7 +19,7 @@ class PatchCore(LightningModule):
         backbone: Module,
         img_size: int,
         patch_sizes: list,
-        patch_channels: list,
+        patch_channels: int,
         max_sampling_time: int,
         coreset_ratio=1.0,
         num_starting_points: int = 10,
@@ -31,11 +31,11 @@ class PatchCore(LightningModule):
         self.patch_sizes = patch_sizes
         self.patch_channels = patch_channels
         self.automatic_optimization = False
-        self.memory_bank = IndexFlatL2(sum(patch_channels))
+        self.memory_bank = IndexFlatL2(patch_channels)
         self.latency = MeanMetric()
 
         if projection_channels is not None:
-            self.mapper = Linear(sum(patch_channels), projection_channels, bias=False)
+            self.mapper = Linear(patch_channels, projection_channels, bias=False)
         else:
             self.mapper = lambda x: x
 
@@ -50,11 +50,9 @@ class PatchCore(LightningModule):
         # Get feature map from each extraction block
         layer_outputs = list(self.backbone(x).values())
 
-        if len(layer_outputs) != len(self.patch_sizes) or len(layer_outputs) != len(
-            self.patch_channels
-        ):
+        if len(layer_outputs) != len(self.patch_sizes):
             raise RuntimeError(
-                "The returned number of layers from the backbone and the number of patch sizes or channels is not the same."
+                "The returned number of layers from the backbone and the number of patch sizes is not the same."
             )
 
         self.patch_resolution = max(output.shape[-2:] for output in layer_outputs)
@@ -68,20 +66,21 @@ class PatchCore(LightningModule):
                 stride=1,
             )
 
-            # If necessary, upsample the patches to the maximum patch resolution
+            # Make sure the patches have the same resolution (maximum)
             patches = interpolate(patches, size=self.patch_resolution, mode="bilinear")
 
             # Flatten the patches
             patches = patches.permute(0, 2, 3, 1)  # [N, H, W, C]
             patches = patches.flatten(end_dim=-2)  # [N*H*W, C]
 
-            # If necessary, reduce the number of channels using pooling
-            patches = adaptive_avg_pool1d(patches, self.patch_channels[i])
+            # Make sure the patches have the same channels (maximum)
+            patches = adaptive_avg_pool1d(patches, self.patch_channels)
 
             layer_patches.append(patches)
 
         # Combine the layers into the final patches
-        return torch.cat(layer_patches, dim=-1)
+        patches = torch.cat(layer_patches, dim=-1)
+        return adaptive_avg_pool1d(patches, self.patch_channels)
 
     def forward(self, x: torch.Tensor):
         # Extract patches from the backbone

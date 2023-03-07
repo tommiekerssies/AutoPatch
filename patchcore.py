@@ -20,7 +20,6 @@ class PatchCore(LightningModule):
         img_size: int,
         patch_sizes: list,
         patch_channels: int,
-        max_sampling_time: int,
         coreset_ratio=1.0,
         num_starting_points: int = 10,
         projection_channels=None,
@@ -43,7 +42,6 @@ class PatchCore(LightningModule):
             ratio=coreset_ratio,
             num_starting_points=num_starting_points,
             mapper=self.mapper,
-            max_sampling_time=max_sampling_time,
         )
 
     def _patchify(self, x: torch.Tensor) -> torch.Tensor:
@@ -98,9 +96,11 @@ class PatchCore(LightningModule):
         )  # [N, C=1, H=self.patch_resolution[0], W=self.patch_resolution[1]]
 
         # Finally, upsample the patch-level predictions to the original image size
-        return interpolate(
+        scores = interpolate(
             scores, size=self.img_size, mode="bilinear"
         )  # [N, C=1, H=self.img_size, W=self.img_size]
+
+        return scores.squeeze()  # [N, H=self.img_size, W=self.img_size]
 
     def on_fit_start(self) -> None:
         self.trainer.datamodule.to(self.device)
@@ -119,17 +119,24 @@ class PatchCore(LightningModule):
             patches = self.sampler.run(patches)
             self.memory_bank.add(patches)
 
-    def test_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _inference_step(self, batch):
         start_time = default_timer()
         x, y = batch
         y_hat = self(x)
         self.latency(default_timer() - start_time)
         return y_hat, y
 
-    def test_epoch_end(self, outputs) -> None:
-        y_hat = torch.cat([y_hat for y_hat, _ in outputs], dim=0).squeeze().cpu()
-        y = torch.cat([y for _, y in outputs], dim=0).squeeze().cpu()
-        y = (y > 0).int()  # As image was resized there may be values between 0 and 1
+    def validation_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._inference_step(batch)
+
+    def test_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._inference_step(batch)
+
+    def _compute_metrics(
+        self, outputs: list
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        y_hat = torch.cat([y_hat for y_hat, _ in outputs], dim=0).cpu()
+        y = torch.cat([y for _, y in outputs], dim=0).cpu()
 
         regions_per_image = [regionprops(label(y[i])) for i in range(len(y))]
         mean_region_area = mean(
@@ -143,13 +150,37 @@ class PatchCore(LightningModule):
                     mean_region_area / region.area
                 )
 
-        precision, recall, _ = precision_recall_curve(
+        precision, recall, thresholds = precision_recall_curve(
             y_hat.flatten(), y.flatten(), sample_weights=sample_weights.flatten()
         )
+        self.rwAP = -torch.sum((recall[1:] - recall[:-1]) * precision[:-1]).item()
 
-        self.region_weighted_avg_precision = -torch.sum(
-            (recall[1:] - recall[:-1]) * precision[:-1]
+        f1 = 2 * (precision * recall) / (precision + recall)
+        f1 = f1.nan_to_num()
+
+        if hasattr(self, "threshold"):
+            self.rwF1 = f1[self._get_nearest_idx(thresholds, self.threshold)].item()
+
+        optimal_idx = torch.argmax(f1)
+        self.threshold = thresholds[optimal_idx].item()
+        self.optimal_rwF1 = f1[optimal_idx].item()
+
+    def validation_epoch_end(self, outputs) -> None:
+        self._compute_metrics(outputs)
+
+    def test_epoch_end(self, outputs) -> None:
+        self._compute_metrics(outputs)
+
+    @staticmethod
+    def _get_nearest_idx(one_d_tensor: torch.Tensor, value: float) -> int:
+        idx = (
+            len(one_d_tensor) - 1
+            if one_d_tensor[-1] < value
+            else torch.searchsorted(one_d_tensor, value, right=True)
         )
+        if one_d_tensor[idx - 1] == value:
+            idx -= 1
+        return idx
 
     def configure_optimizers(self):
         pass

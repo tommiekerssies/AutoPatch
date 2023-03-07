@@ -10,7 +10,7 @@ class ApproximateGreedyCoresetSampler:
         ratio: float,
         num_starting_points: int,
         mapper: Linear,
-        max_sampling_time: int,
+        max_sampling_time: int = None,
     ):
         if not 0 < ratio <= 1:
             raise ValueError("ratio value not in (0,1].")

@@ -13,25 +13,13 @@ from optuna.samplers import TPESampler
 from deepspeed.profiling.flops_profiler import get_model_profile
 
 
-def run(patchcore, trainer_kwargs, datamodule):
-    trainer = Trainer(**trainer_kwargs)
-    info(f"Fitting on {datamodule.class_}...")
-    trainer.fit(patchcore, datamodule=datamodule)
-    info(f"Testing on {datamodule.class_}...")
-    trainer.test(patchcore, datamodule=datamodule)
-    return (
-        patchcore.latency.compute().item(),
-        patchcore.region_weighted_avg_precision.item(),
-    )
-
-
 def objective(
     trial,
+    datamodule,
     trainer_kwargs,
     max_img_size,
-    max_sampling_time=None,
-    source_datamodules=None,
-    target_datamodule=None,
+    search_on_test_set=False,
+    return_patchcore=False,
 ):
     supernet = ofa_net(
         trial.suggest_categorical(
@@ -83,14 +71,12 @@ def objective(
         supernet, [f"blocks.{block}" for block in extraction_blocks]
     )
     img_size = trial.suggest_int("img_size", 128, max_img_size, step=32)
-    flops, macs, _ = get_model_profile(
+    flops, _, _ = get_model_profile(
         feature_extractor,
         (1, 3, img_size, img_size),
         print_profile=False,
         as_string=False,
     )
-    trial.set_user_attr("flops", flops)
-    trial.set_user_attr("macs", macs)
 
     patch_sizes = [
         patch_size
@@ -107,52 +93,36 @@ def objective(
         max_epochs=1,
     )
 
-    if target_datamodule is not None:
-        patchcore = PatchCore(
-            feature_extractor,
-            img_size,
-            patch_sizes,
-            patch_channels,
-            max_sampling_time=max_sampling_time,
-        )
-        max_sampling_time = None
-        latency, region_weighted_avg_precision = run(
-            patchcore, trainer_kwargs, target_datamodule
-        )
-        trial.set_user_attr("target_latency", latency)
-        trial.set_user_attr(
-            "target_region_weighted_avg_precision", region_weighted_avg_precision
-        )
-
-    if source_datamodules is None:
-        return patchcore
-
-    latencies = []
-    region_weighted_avg_precisions = []
-    for datamodule in source_datamodules:
-        patchcore = PatchCore(
-            feature_extractor,
-            img_size,
-            patch_sizes,
-            patch_channels,
-            max_sampling_time=max_sampling_time,
-        )
-        max_sampling_time = None
-        latency, region_weighted_avg_precision = run(
-            patchcore, trainer_kwargs, datamodule
-        )
-        latencies.append(latency)
-        region_weighted_avg_precisions.append(region_weighted_avg_precision)
-
-    trial.set_user_attr("source_latency_mean", mean(latencies))
-    trial.set_user_attr(
-        "source_region_weighted_avg_precision_mean",
-        mean(region_weighted_avg_precisions),
+    patchcore = PatchCore(
+        feature_extractor,
+        img_size,
+        patch_sizes,
+        patch_channels,
     )
 
+    trainer = Trainer(**trainer_kwargs)
+    info("Fitting...")
+    trainer.fit(patchcore, datamodule=datamodule)
+    trial.set_user_attr("val_rwAP", patchcore.rwAP)
+    trial.set_user_attr("val_optimal_threshold", patchcore.threshold)
+    trial.set_user_attr("val_optimal_rwF1", patchcore.optimal_rwF1)
+
+    info("Testing...")
+    trainer.test(patchcore, datamodule=datamodule)
+    trial.set_user_attr("test_rwAP", patchcore.rwAP)
+    trial.set_user_attr("test_optimal_threshold", patchcore.threshold)
+    trial.set_user_attr("test_optimal_rwF1", patchcore.optimal_rwF1)
+    trial.set_user_attr("test_rwF1", patchcore.rwF1)
+
+    if return_patchcore:
+        return patchcore
+
+    if search_on_test_set:
+        return [flops, trial.user_attrs["test_rwAP"]]
+
     return [
-        trial.user_attrs["flops"],
-        trial.user_attrs["source_region_weighted_avg_precision_mean"],
+        flops,
+        trial.user_attrs["val_rwAP"],
     ]
 
 
@@ -174,33 +144,21 @@ def main(args, trainer_kwargs):
         ),
     )
 
-    source_datamodules = [
-        MVTecDataModule(
-            args.dataset_dir,
-            class_,
-            args.max_img_size,
-            args.batch_size,
-            args.test_batch_size,
-        )
-        for class_ in args.sources
-    ]
-    if args.target:
-        target_datamodule = MVTecDataModule(
-            args.dataset_dir,
-            args.target,
-            args.max_img_size,
-            args.batch_size,
-            args.test_batch_size,
-        )
+    datamodule = MVTecDataModule(
+        args.dataset_dir,
+        args.category,
+        args.max_img_size,
+        args.batch_size,
+        args.k,
+    )
 
     study.optimize(
         lambda trial: objective(
             trial,
+            datamodule,
             trainer_kwargs,
             args.max_img_size,
-            args.max_sampling_time,
-            source_datamodules=source_datamodules,
-            target_datamodule=target_datamodule if args.target else None,
+            args.search_on_test_set,
         ),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
@@ -211,18 +169,17 @@ def main(args, trainer_kwargs):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--study_name", type=str)
-    parser.add_argument("--n_trials", type=int)
+    parser.add_argument("--n_trials", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
+    parser.add_argument("--search_on_test_set", action="store_true")
+    parser.add_argument("--k", type=int)
     parser.add_argument("--batch_size", type=int, default=391)
-    parser.add_argument("--test_batch_size", type=int)
     parser.add_argument("--max_img_size", type=int, default=224)
-    parser.add_argument("--max_sampling_time", type=int)
+    parser.add_argument("--category", type=str)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
     )
-    parser.add_argument("--sources", nargs="+")
-    parser.add_argument("--target", type=str)
     parser.add_argument(
         "--db_url",
         type=str,

@@ -2,9 +2,8 @@ from typing import Optional
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, Normalize, ToTensor
-from torchvision.transforms.functional import resize
 from os import listdir
-from torch import device, stack, zeros
+from torch import device, dtype, int32, stack, zeros
 from torch.utils.data import Dataset
 from pathlib import Path
 from PIL.Image import open
@@ -15,7 +14,7 @@ class MVTecDataset(Dataset):
         self,
         dataset_dir: str,
         category: str,
-        max_img_size: int,
+        img_size: int,
         k: int,
         split: str,
     ):
@@ -66,8 +65,8 @@ class MVTecDataset(Dataset):
                     img_mask_pairs.extend(list(zip(img_paths, mask_paths))[k:])
 
         transforms = [
+            Resize(img_size),
             ToTensor(),
-            Resize(max_img_size, antialias=True),
         ]
         transform_img = Compose(
             transforms
@@ -80,25 +79,19 @@ class MVTecDataset(Dataset):
         for img_path, mask_path in img_mask_pairs:
             imgs.append(transform_img(open(img_path).convert("RGB")))
             masks.append(
-                transform_mask(open(mask_path))
+                (transform_mask(open(mask_path)) > 0).int().squeeze()
                 if mask_path is not None
-                else zeros([1, *imgs[-1].size()[1:]])
+                else zeros([*imgs[-1].size()[-2:]], dtype=int32)
             )
 
         self.imgs = stack(imgs)
         self.masks = stack(masks)
-        self.img_size = max_img_size
 
     def __len__(self):
         return len(self.imgs)
 
     def __getitem__(self, i: int):
-        img, mask = self.imgs[i], self.masks[i]
-        if self.img_size != img.shape[-1]:
-            img = resize(img, self.img_size, antialias=True)
-            mask = resize(mask, self.img_size, antialias=True)
-        # As image was resized there may be values between 0 and 1
-        return img, (mask > 0).int().squeeze()
+        return self.imgs[i], self.masks[i]
 
     def to(self, device: device):
         self.imgs = self.imgs.to(device)
@@ -110,14 +103,14 @@ class MVTecDataModule(LightningDataModule):
         self,
         dataset_dir: str,
         category: str,
-        max_img_size: str,
+        img_size: str,
         batch_size: int,
         k: int,
     ):
         super().__init__()
         self.dataset_dir = dataset_dir
         self.category = category
-        self.max_img_size = max_img_size
+        self.img_size = img_size
         self.batch_size = batch_size
         self.k = k
 
@@ -126,7 +119,7 @@ class MVTecDataModule(LightningDataModule):
             self.train_dataset = MVTecDataset(
                 self.dataset_dir,
                 self.category,
-                self.max_img_size,
+                self.img_size,
                 self.k,
                 split="train",
             )
@@ -135,7 +128,7 @@ class MVTecDataModule(LightningDataModule):
             self.val_dataset = MVTecDataset(
                 self.dataset_dir,
                 self.category,
-                self.max_img_size,
+                self.img_size,
                 self.k,
                 split="val",
             )
@@ -144,7 +137,7 @@ class MVTecDataModule(LightningDataModule):
             self.test_dataset = MVTecDataset(
                 self.dataset_dir,
                 self.category,
-                self.max_img_size,
+                self.img_size,
                 self.k,
                 split="test",
             )
@@ -164,8 +157,3 @@ class MVTecDataModule(LightningDataModule):
         self.train_dataset.to(device)
         self.val_dataset.to(device)
         self.test_dataset.to(device)
-
-    def set_img_size(self, img_size: int):
-        self.train_dataset.img_size = img_size
-        self.val_dataset.img_size = img_size
-        self.test_dataset.img_size = img_size

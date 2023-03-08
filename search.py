@@ -17,8 +17,8 @@ def objective(
     trial,
     datamodule,
     trainer_kwargs,
-    max_img_size,
-    search_on_test_set=False,
+    img_size,
+    test_set_search=False,
     return_patchcore=False,
 ):
     supernet = ofa_net(
@@ -70,7 +70,7 @@ def objective(
     feature_extractor = FeatureExtractor(
         supernet, [f"blocks.{block}" for block in extraction_blocks]
     )
-    img_size = trial.suggest_int("img_size", 128, max_img_size, step=32)
+
     flops, _, _ = get_model_profile(
         feature_extractor,
         (1, 3, img_size, img_size),
@@ -91,7 +91,9 @@ def objective(
         deterministic="warn",
         detect_anomaly=True,
         max_epochs=1,
+        limit_val_batches=0 if test_set_search else None,
     )
+    trainer = Trainer(**trainer_kwargs)
 
     patchcore = PatchCore(
         feature_extractor,
@@ -100,30 +102,22 @@ def objective(
         patch_channels,
     )
 
-    trainer = Trainer(**trainer_kwargs)
     info("Fitting...")
     trainer.fit(patchcore, datamodule=datamodule)
-    trial.set_user_attr("val_rwAP", patchcore.rwAP)
-    trial.set_user_attr("val_optimal_threshold", patchcore.threshold)
-    trial.set_user_attr("val_optimal_rwF1", patchcore.optimal_rwF1)
+    if not test_set_search:
+        trial.set_user_attr("val_rwAP", patchcore.rwAP)
 
     info("Testing...")
     trainer.test(patchcore, datamodule=datamodule)
     trial.set_user_attr("test_rwAP", patchcore.rwAP)
-    trial.set_user_attr("test_optimal_threshold", patchcore.threshold)
-    trial.set_user_attr("test_optimal_rwF1", patchcore.optimal_rwF1)
-    trial.set_user_attr("test_rwF1", patchcore.rwF1)
 
     if return_patchcore:
         return patchcore
 
-    if search_on_test_set:
+    if test_set_search:
         return [flops, trial.user_attrs["test_rwAP"]]
-
-    return [
-        flops,
-        trial.user_attrs["val_rwAP"],
-    ]
+    else:
+        return [flops, trial.user_attrs["val_rwAP"]]
 
 
 def main(args, trainer_kwargs):
@@ -147,7 +141,7 @@ def main(args, trainer_kwargs):
     datamodule = MVTecDataModule(
         args.dataset_dir,
         args.category,
-        args.max_img_size,
+        args.img_size,
         args.batch_size,
         args.k,
     )
@@ -157,8 +151,8 @@ def main(args, trainer_kwargs):
             trial,
             datamodule,
             trainer_kwargs,
-            args.max_img_size,
-            args.search_on_test_set,
+            args.img_size,
+            args.test_set_search,
         ),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
@@ -169,13 +163,13 @@ def main(args, trainer_kwargs):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--study_name", type=str)
-    parser.add_argument("--n_trials", type=int, default=2000)
+    parser.add_argument("--n_trials", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
-    parser.add_argument("--search_on_test_set", action="store_true")
+    parser.add_argument("--test_set_search", action="store_true")
     parser.add_argument("--k", type=int)
     parser.add_argument("--batch_size", type=int, default=391)
-    parser.add_argument("--max_img_size", type=int, default=224)
+    parser.add_argument("--img_size", type=int, default=224)
     parser.add_argument("--category", type=str)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"

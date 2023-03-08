@@ -56,7 +56,7 @@ class PatchCore(LightningModule):
         self.patch_resolution = max(output.shape[-2:] for output in layer_outputs)
         layer_patches = []
         for i in range(len(layer_outputs)):
-            # Extract patches from the feature map
+            # Perform local neighbourhood aggregation
             patches = avg_pool2d(
                 layer_outputs[i],
                 kernel_size=self.patch_sizes[i],
@@ -64,16 +64,15 @@ class PatchCore(LightningModule):
                 stride=1,
             )
 
-            # Make sure the patches have the same resolution (maximum)
+            # Make sure the patches have the right resolution
             patches = interpolate(patches, size=self.patch_resolution, mode="bilinear")
 
             # Flatten the patches
             patches = patches.permute(0, 2, 3, 1)  # [N, H, W, C]
             patches = patches.flatten(end_dim=-2)  # [N*H*W, C]
 
-            # Make sure the patches have the same channels (maximum)
+            # Make sure the patches have the right number of channels
             patches = adaptive_avg_pool1d(patches, self.patch_channels)
-
             layer_patches.append(patches)
 
         # Combine the layers into the final patches
@@ -104,7 +103,6 @@ class PatchCore(LightningModule):
 
     def on_fit_start(self) -> None:
         self.trainer.datamodule.to(self.device)
-        self.trainer.datamodule.set_img_size(self.img_size)
         if self.device.type == "cuda" and type(self.memory_bank) == IndexFlatL2:
             resource = StandardGpuResources()
             resource.noTempMemory()
@@ -143,44 +141,24 @@ class PatchCore(LightningModule):
             [region.area for regions in regions_per_image for region in regions]
         )
 
-        sample_weights = torch.ones_like(y).float()
+        sample_weights = torch.ones_like(y, dtype=torch.float32)
         for i in range(len(regions_per_image)):
             for region in regions_per_image[i]:
                 sample_weights[i, region.coords[:, 0], region.coords[:, 1]] = (
                     mean_region_area / region.area
                 )
 
-        precision, recall, thresholds = precision_recall_curve(
+        precision, recall, _ = precision_recall_curve(
             y_hat.flatten(), y.flatten(), sample_weights=sample_weights.flatten()
         )
+
         self.rwAP = -torch.sum((recall[1:] - recall[:-1]) * precision[:-1]).item()
-
-        f1 = 2 * (precision * recall) / (precision + recall)
-        f1 = f1.nan_to_num()
-
-        if hasattr(self, "threshold"):
-            self.rwF1 = f1[self._get_nearest_idx(thresholds, self.threshold)].item()
-
-        optimal_idx = torch.argmax(f1)
-        self.threshold = thresholds[optimal_idx].item()
-        self.optimal_rwF1 = f1[optimal_idx].item()
 
     def validation_epoch_end(self, outputs) -> None:
         self._compute_metrics(outputs)
 
     def test_epoch_end(self, outputs) -> None:
         self._compute_metrics(outputs)
-
-    @staticmethod
-    def _get_nearest_idx(one_d_tensor: torch.Tensor, value: float) -> int:
-        idx = (
-            len(one_d_tensor) - 1
-            if one_d_tensor[-1] < value
-            else torch.searchsorted(one_d_tensor, value, right=True)
-        )
-        if one_d_tensor[idx - 1] == value:
-            idx -= 1
-        return idx
 
     def configure_optimizers(self):
         pass

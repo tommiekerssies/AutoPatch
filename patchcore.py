@@ -3,7 +3,7 @@ from statistics import mean
 from faiss import IndexFlatL2, StandardGpuResources, index_cpu_to_gpu
 from timeit import default_timer
 from pytorch_lightning import LightningModule
-from torch.nn.functional import adaptive_avg_pool1d, interpolate, avg_pool2d
+from torch.nn.functional import interpolate, avg_pool2d
 from torchmetrics import MeanMetric
 from sampler import ApproximateGreedyCoresetSampler
 from typing import Tuple
@@ -71,13 +71,10 @@ class PatchCore(LightningModule):
             patches = patches.permute(0, 2, 3, 1)  # [N, H, W, C]
             patches = patches.flatten(end_dim=-2)  # [N*H*W, C]
 
-            # Make sure the patches have the right number of channels
-            patches = adaptive_avg_pool1d(patches, self.patch_channels)
             layer_patches.append(patches)
 
         # Combine the layers into the final patches
-        patches = torch.cat(layer_patches, dim=-1)
-        return adaptive_avg_pool1d(patches, self.patch_channels)
+        return torch.cat(layer_patches, dim=-1)
 
     def forward(self, x: torch.Tensor):
         # Extract patches from the backbone
@@ -112,17 +109,17 @@ class PatchCore(LightningModule):
 
     def training_step(self, batch, _) -> None:
         with torch.no_grad():
-            x, _ = batch
+            x, _, _ = batch
             patches = self.eval()._patchify(x)
             patches = self.sampler.run(patches)
             self.memory_bank.add(patches)
 
     def _inference_step(self, batch):
         start_time = default_timer()
-        x, y = batch
+        x, y, x_type = batch
         y_hat = self(x)
         self.latency(default_timer() - start_time)
-        return y_hat, y
+        return y_hat, y, x_type
 
     def validation_step(self, batch, _) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._inference_step(batch)
@@ -133,10 +130,23 @@ class PatchCore(LightningModule):
     def _compute_metrics(
         self, outputs: list
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        y_hat = torch.cat([y_hat for y_hat, _ in outputs], dim=0).cpu()
-        y = torch.cat([y for _, y in outputs], dim=0).cpu()
+        y_hat = torch.cat([y_hat for y_hat, _, _ in outputs], dim=0).cpu()
+        y = torch.cat([y for _, y, _ in outputs], dim=0).cpu()
+        x_type = []
+        for _, _, x_type_i in outputs:
+            x_type.extend(x_type_i)
 
-        regions_per_image = [regionprops(label(y[i])) for i in range(len(y))]
+        region_count_per_type = {}
+        regions_per_image = []
+        for i in range(len(y)):
+            regions = regionprops(label(y[i]))
+            if x_type[i] not in region_count_per_type:
+                region_count_per_type[x_type[i]] = 0
+            region_count_per_type[x_type[i]] += len(regions)
+            regions_per_image.append(regions)
+        region_count_per_type.pop("good")
+
+        mean_region_count = mean(region_count_per_type.values())
         mean_region_area = mean(
             [region.area for regions in regions_per_image for region in regions]
         )
@@ -146,13 +156,13 @@ class PatchCore(LightningModule):
             for region in regions_per_image[i]:
                 sample_weights[i, region.coords[:, 0], region.coords[:, 1]] = (
                     mean_region_area / region.area
-                )
+                ) * (mean_region_count / region_count_per_type[x_type[i]])
 
         precision, recall, _ = precision_recall_curve(
             y_hat.flatten(), y.flatten(), sample_weights=sample_weights.flatten()
         )
 
-        self.rwAP = -torch.sum((recall[1:] - recall[:-1]) * precision[:-1]).item()
+        self.wAP = -torch.sum((recall[1:] - recall[:-1]) * precision[:-1]).item()
 
     def validation_epoch_end(self, outputs) -> None:
         self._compute_metrics(outputs)

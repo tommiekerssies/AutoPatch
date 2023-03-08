@@ -1,7 +1,6 @@
 from argparse import ArgumentParser
 from inspect import signature
 from logging import WARNING, INFO, basicConfig, getLogger, info
-from statistics import mean
 from optuna import create_study
 from torch import set_float32_matmul_precision
 from mvtec import MVTecDataModule
@@ -42,11 +41,11 @@ def objective(
         stage_expand_ratio[stage_idx] = trial.suggest_categorical(
             f"stage_{stage_idx}_expand_ratio", [3, 4, 6]
         )
-        stage_patch_size[stage_idx] = trial.suggest_int(
-            f"stage_{stage_idx}_patch_size", 1, 16, step=1
-        )
         stage_block[stage_idx] = trial.suggest_categorical(
             f"stage_{stage_idx}_block", [None, *stage_blocks]
+        )
+        stage_patch_size[stage_idx] = trial.suggest_int(
+            f"stage_{stage_idx}_patch_size", 1, 16, step=1
         )
 
         stage_depths[stage_idx] = 2
@@ -78,13 +77,6 @@ def objective(
         as_string=False,
     )
 
-    patch_sizes = [
-        patch_size
-        for stage_idx, patch_size in stage_patch_size.items()
-        if stage_idx in stage_block and stage_block[stage_idx] is not None
-    ]
-    patch_channels = supernet.blocks[extraction_blocks[-1]].conv.out_channels
-
     trainer_kwargs |= dict(
         num_sanity_val_steps=0,
         logger=False,
@@ -98,26 +90,32 @@ def objective(
     patchcore = PatchCore(
         feature_extractor,
         img_size,
-        patch_sizes,
-        patch_channels,
+        patch_sizes=[
+            patch_size
+            for stage_idx, patch_size in stage_patch_size.items()
+            if stage_idx in stage_block and stage_block[stage_idx] is not None
+        ],
+        patch_channels=sum(
+            supernet.blocks[block].conv.out_channels for block in extraction_blocks
+        ),
     )
 
     info("Fitting...")
     trainer.fit(patchcore, datamodule=datamodule)
     if not test_set_search:
-        trial.set_user_attr("val_rwAP", patchcore.rwAP)
+        trial.set_user_attr("val_wAP", patchcore.wAP)
 
     info("Testing...")
     trainer.test(patchcore, datamodule=datamodule)
-    trial.set_user_attr("test_rwAP", patchcore.rwAP)
+    trial.set_user_attr("test_wAP", patchcore.wAP)
 
     if return_patchcore:
         return patchcore
 
     if test_set_search:
-        return [flops, trial.user_attrs["test_rwAP"]]
+        return [flops, trial.user_attrs["test_wAP"]]
     else:
-        return [flops, trial.user_attrs["val_rwAP"]]
+        return [flops, trial.user_attrs["val_wAP"]]
 
 
 def main(args, trainer_kwargs):

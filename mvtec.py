@@ -26,43 +26,47 @@ class MVTecDataset(Dataset):
         if split == "train":
             train_good_files = sorted(listdir(train_good_path)[num_holdout:])
             img_paths = [Path(train_good_path, img) for img in train_good_files]
-            img_mask_pairs = [(str(img_path), None) for img_path in img_paths]
+            pairs = [(str(img_path), None, "good") for img_path in img_paths]
 
         elif split == "val":
             val_good_files = sorted(listdir(train_good_path)[:num_holdout])
             img_paths = [Path(train_good_path, img) for img in val_good_files]
-            img_mask_pairs = [(str(img_path), None) for img_path in img_paths]
-            for subclass in listdir(test_path):
-                if subclass == "good":
+            pairs = [(str(img_path), None, "good") for img_path in img_paths]
+
+            for img_type in sorted(listdir(test_path)):
+                if img_type == "good":
                     continue
-                subclass_img_files = sorted(listdir(Path(test_path, subclass)))
-                subclass_mask_files = sorted(listdir(Path(mask_path, subclass)))
+                subclass_img_files = sorted(listdir(Path(test_path, img_type)))
+                subclass_mask_files = sorted(listdir(Path(mask_path, img_type)))
                 img_paths = [
-                    str(Path(test_path, subclass, img)) for img in subclass_img_files
+                    str(Path(test_path, img_type, img)) for img in subclass_img_files
                 ]
                 mask_paths = [
-                    str(Path(mask_path, subclass, mask)) for mask in subclass_mask_files
+                    str(Path(mask_path, img_type, mask)) for mask in subclass_mask_files
                 ]
-                img_mask_pairs.extend(list(zip(img_paths, mask_paths))[:k])
+                img_types = [img_type] * len(img_paths)
+                pairs.extend(list(zip(img_paths, mask_paths, img_types))[:k])
 
         elif split == "test":
-            img_mask_pairs = []
-            for subclass in sorted(listdir(test_path)):
-                subclass_img_files = sorted(listdir(Path(test_path, subclass)))
+            pairs = []
+
+            for img_type in sorted(listdir(test_path)):
+                subclass_img_files = sorted(listdir(Path(test_path, img_type)))
                 img_paths = [
-                    Path(test_path, subclass, img) for img in subclass_img_files
+                    Path(test_path, img_type, img) for img in subclass_img_files
                 ]
-                if subclass == "good":
-                    img_mask_pairs.extend(
-                        (str(img_path), None) for img_path in img_paths
+                if img_type == "good":
+                    pairs.extend(
+                        (str(img_path), None, img_type) for img_path in img_paths
                     )
                 else:
-                    subclass_mask_files = sorted(listdir(Path(mask_path, subclass)))
+                    subclass_mask_files = sorted(listdir(Path(mask_path, img_type)))
                     mask_paths = [
-                        str(Path(mask_path, subclass, mask))
+                        str(Path(mask_path, img_type, mask))
                         for mask in subclass_mask_files
                     ]
-                    img_mask_pairs.extend(list(zip(img_paths, mask_paths))[k:])
+                    img_types = [img_type] * len(img_paths)
+                    pairs.extend(list(zip(img_paths, mask_paths, img_types))[k:])
 
         transforms = [
             Resize(img_size),
@@ -76,22 +80,25 @@ class MVTecDataset(Dataset):
 
         imgs = []
         masks = []
-        for img_path, mask_path in img_mask_pairs:
+        img_types = []
+        for img_path, mask_path, img_type in pairs:
             imgs.append(transform_img(open(img_path).convert("RGB")))
             masks.append(
                 (transform_mask(open(mask_path)) > 0).int().squeeze()
                 if mask_path is not None
                 else zeros([*imgs[-1].size()[-2:]], dtype=int32)
             )
+            img_types.append(img_type)
 
         self.imgs = stack(imgs)
         self.masks = stack(masks)
+        self.img_types = img_types
 
     def __len__(self):
         return len(self.imgs)
 
     def __getitem__(self, i: int):
-        return self.imgs[i], self.masks[i]
+        return self.imgs[i], self.masks[i], self.img_types[i]
 
     def to(self, device: device):
         self.imgs = self.imgs.to(device)

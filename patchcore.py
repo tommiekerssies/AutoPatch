@@ -45,7 +45,7 @@ class PatchCore(LightningModule):
         )
 
     def _patchify(self, x: torch.Tensor) -> torch.Tensor:
-        # Get feature map from each extraction block
+        # Get output from each extraction block
         layer_outputs = list(self.backbone(x).values())
 
         if len(layer_outputs) != len(self.patch_sizes):

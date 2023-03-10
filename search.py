@@ -130,7 +130,7 @@ def main(args, trainer_kwargs):
         directions=["minimize", "maximize"],
         storage=args.db_url if args.study_name else None,
         sampler=TPESampler(
-            seed=None if args.study_name else args.seed,
+            seed=args.seed,
             multivariate=True,
             constant_liar=True,
         ),

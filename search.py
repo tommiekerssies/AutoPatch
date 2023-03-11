@@ -164,7 +164,9 @@ if __name__ == "__main__":
     parser.add_argument("--n_trials", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_jobs", type=int, default=1)
-    parser.add_argument("--test_set_search", action="store_true")
+    parser.add_argument(
+        "--test_set_search", default=False, type=lambda x: (str(x).lower() == "true")
+    )
     parser.add_argument("--k", type=int)
     parser.add_argument("--batch_size", type=int, default=391)
     parser.add_argument("--img_size", type=int, default=224)

@@ -1,7 +1,12 @@
+"""
+The code in this file is borrowed from TorchMetrics v1.9.3 (https://github.com/Lightning-AI/metrics/tree/v0.9.3) (Apache-2.0 License)
+"""
+
 from typing import List, Optional, Sequence, Tuple, Union, Any, no_type_check, Dict
 import torch
 from torch import Tensor, tensor
 from torchmetrics.utilities import rank_zero_warn
+from torchmetrics.utilities.imports import _TORCH_GREATER_EQUAL_1_9
 from torchmetrics.metric import Metric
 from torchmetrics.utilities.data import dim_zero_cat
 import warnings
@@ -1316,11 +1321,13 @@ def _auroc_compute(
                 f"`max_fpr` should be a float in range (0, 1], got: {max_fpr}"
             )
 
-        if _TORCH_LOWER_1_6:
-            raise RuntimeError(
-                "`max_fpr` argument requires `torch.bucketize` which"
-                " is not available below PyTorch version 1.6"
-            )
+        if not _TORCH_GREATER_EQUAL_1_9:
+            raise RuntimeError()
+        # if _TORCH_LOWER_1_6:
+        #     raise RuntimeError(
+        #         "`max_fpr` argument requires `torch.bucketize` which"
+        #         " is not available below PyTorch version 1.6"
+        #     )
 
         # max_fpr parameter is only support for binary
         if mode != DataType.BINARY:

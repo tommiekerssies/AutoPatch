@@ -9,4 +9,4 @@
 source /home/tommie_kerssies/miniconda3/etc/profile.d/conda.sh
 conda activate AutoPatch
 
-srun python search.py --accelerator auto --study_name $1 --n_trials $2 --k $3 --seed $4 --category $5 --test_set_search $6
+srun python search.py --accelerator auto --study_name $1 --n_trials $2 --k $3 --seed $4 --category $5 --test_set_search $6 --fixed_supernet_name $7 --fixed_kernel_size $8 --fixed_expand_ratio $9

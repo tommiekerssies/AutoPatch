@@ -1,3 +1,8 @@
+"""
+The code in this file is borrowed from PatchCore (https://github.com/amazon-science/patchcore-inspection) (Apache-2.0 License)
+"""
+
+
 import contextlib
 from copy import deepcopy
 from torch.nn import Module, Sequential

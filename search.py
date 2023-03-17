@@ -4,7 +4,7 @@ from logging import WARNING, INFO, basicConfig, getLogger, info
 from optuna import create_study
 from torch import set_float32_matmul_precision
 from mvtec import MVTecDataModule
-from patchcore import PatchCore
+from model import Model
 from pytorch_lightning import Trainer, seed_everything
 from ofa.model_zoo import ofa_net
 from feature_extractor import FeatureExtractor
@@ -17,14 +17,19 @@ def objective(
     datamodule,
     trainer_kwargs,
     img_size,
+    fixed_supernet_name=None,
+    fixed_kernel_size=None,
+    fixed_expand_ratio=None,
     test_set_search=False,
-    return_patchcore=False,
+    return_model=False,
 ):
     supernet = ofa_net(
         trial.suggest_categorical(
             "supernet_name",
             ["ofa_mbv3_d234_e346_k357_w1.0", "ofa_mbv3_d234_e346_k357_w1.2"],
-        ),
+        )
+        if fixed_supernet_name is None
+        else fixed_supernet_name,
         pretrained=True,
     )
 
@@ -35,11 +40,15 @@ def objective(
     stage_patch_size = {}
 
     for stage_idx, stage_blocks in enumerate(supernet.block_group_info):
-        stage_kernel_size[stage_idx] = trial.suggest_int(
-            f"stage_{stage_idx}_kernel_size", 3, 7, step=2
+        stage_kernel_size[stage_idx] = (
+            trial.suggest_int(f"stage_{stage_idx}_kernel_size", 3, 7, step=2)
+            if fixed_kernel_size is None
+            else fixed_kernel_size
         )
-        stage_expand_ratio[stage_idx] = trial.suggest_categorical(
-            f"stage_{stage_idx}_expand_ratio", [3, 4, 6]
+        stage_expand_ratio[stage_idx] = (
+            trial.suggest_categorical(f"stage_{stage_idx}_expand_ratio", [3, 4, 6])
+            if fixed_expand_ratio is None
+            else fixed_expand_ratio
         )
         stage_block[stage_idx] = trial.suggest_categorical(
             f"stage_{stage_idx}_block", [None, *stage_blocks]
@@ -87,7 +96,7 @@ def objective(
     )
     trainer = Trainer(**trainer_kwargs)
 
-    patchcore = PatchCore(
+    model = Model(
         feature_extractor,
         img_size,
         patch_sizes=[
@@ -101,16 +110,22 @@ def objective(
     )
 
     info("Fitting...")
-    trainer.fit(patchcore, datamodule=datamodule)
+    trainer.fit(model, datamodule=datamodule)
     if not test_set_search:
-        trial.set_user_attr("val_wAP", patchcore.wAP)
+        trial.set_user_attr("val_AUROC", model.AUROC)
+        trial.set_user_attr("val_partial_AUROC", model.partial_AUROC)
+        trial.set_user_attr("val_AP", model.AP)
+        trial.set_user_attr("val_wAP", model.wAP)
 
     info("Testing...")
-    trainer.test(patchcore, datamodule=datamodule)
-    trial.set_user_attr("test_wAP", patchcore.wAP)
+    trainer.test(model, datamodule=datamodule)
+    trial.set_user_attr("test_AUROC", model.AUROC)
+    trial.set_user_attr("test_partial_AUROC", model.partial_AUROC)
+    trial.set_user_attr("test_AP", model.AP)
+    trial.set_user_attr("test_wAP", model.wAP)
 
-    if return_patchcore:
-        return patchcore
+    if return_model:
+        return model
 
     if test_set_search:
         return [flops, trial.user_attrs["test_wAP"]]
@@ -150,6 +165,9 @@ def main(args, trainer_kwargs):
             datamodule,
             trainer_kwargs,
             args.img_size,
+            args.fixed_supernet_name,
+            args.fixed_kernel_size,
+            args.fixed_expand_ratio,
             args.test_set_search,
         ),
         n_trials=args.n_trials,
@@ -171,6 +189,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=391)
     parser.add_argument("--img_size", type=int, default=224)
     parser.add_argument("--category", type=str)
+    parser.add_argument("--fixed_supernet_name", type=str)
+    parser.add_argument("--fixed_kernel_size", type=int)
+    parser.add_argument("--fixed_expand_ratio", type=int)
     parser.add_argument(
         "--dataset_dir", type=str, default="/dataB1/tommie_kerssies/MVTec"
     )

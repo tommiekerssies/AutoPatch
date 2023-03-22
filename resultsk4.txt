@@ -63,27 +63,11 @@ toothbrush partial AUROC: 98.07 +- 0.27
 toothbrush AP: 65.0 +- 2.4
 toothbrush wAP: 56.3 +- 3.6
 toothbrush GFLOPS: 0.30 +- 0.14
-256 256
-Global seed set to 1
-Global seed set to 1
-416 416
-Global seed set to 2
-Global seed set to 2
-64 64
-Global seed set to 0
-Global seed set to 0
 transistor AUROC: 98.12 +- 0.82
 transistor partial AUROC: 96.46 +- 1.39
 transistor AP: 73.4 +- 3.3
 transistor wAP: 71.1 +- 4.5
 transistor GFLOPS: 0.42 +- 0.17
-176 176
-Global seed set to 1
-Global seed set to 1
-128 128
-Global seed set to 2
-Global seed set to 2
-80 80
 zipper AUROC: 99.00 +- 0.14
 zipper partial AUROC: 98.12 +- 0.27
 zipper AP: 78.2 +- 2.6

@@ -1,7 +1,7 @@
 copy_studies.py
 search.sh
-!studies.db
 *.db
+!studies.db
 *.db-journal
 *.html
 *.csv

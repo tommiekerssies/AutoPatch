@@ -1,6 +1,12 @@
+copy_studies.py
+search.sh
+!studies.db
+*.db
+*.db-journal
 *.html
 *.csv
 *.code-workspace
+notebook.ipynb
 logs/
 .*
 !.gitignore

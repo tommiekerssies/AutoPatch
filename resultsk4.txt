@@ -1,0 +1,96 @@
+carpet AUROC: 96.81 +- 0.76
+carpet partial AUROC: 94.42 +- 1.32
+carpet AP: 55.0 +- 16.7
+carpet wAP: 55.1 +- 17.5
+carpet GFLOPS: 0.50 +- 0.27
+grid AUROC: 98.94 +- 0.13
+grid partial AUROC: 97.97 +- 0.24
+grid AP: 62.2 +- 2.1
+grid wAP: 66.5 +- 0.9
+grid GFLOPS: 0.35 +- 0.19
+leather AUROC: 97.72 +- 0.88
+leather partial AUROC: 96.07 +- 1.34
+leather AP: 64.1 +- 2.4
+leather wAP: 73.7 +- 2.9
+leather GFLOPS: 0.37 +- 0.20
+tile AUROC: 98.14 +- 0.07
+tile partial AUROC: 96.89 +- 0.20
+tile AP: 87.2 +- 0.7
+tile wAP: 84.8 +- 0.6
+tile GFLOPS: 0.21 +- 0.10
+wood AUROC: 94.79 +- 0.42
+wood partial AUROC: 91.71 +- 0.75
+wood AP: 64.4 +- 1.8
+wood wAP: 72.5 +- 5.1
+wood GFLOPS: 0.42 +- 0.10
+bottle AUROC: 99.04 +- 0.17
+bottle partial AUROC: 98.12 +- 0.33
+bottle AP: 85.0 +- 1.3
+bottle wAP: 86.5 +- 0.7
+bottle GFLOPS: 0.33 +- 0.03
+cable AUROC: 98.70 +- 0.07
+cable partial AUROC: 97.49 +- 0.16
+cable AP: 78.0 +- 0.3
+cable wAP: 71.1 +- 1.6
+cable GFLOPS: 0.35 +- 0.14
+capsule AUROC: 98.59 +- 0.23
+capsule partial AUROC: 97.45 +- 0.28
+capsule AP: 57.7 +- 1.1
+capsule wAP: 74.7 +- 0.8
+capsule GFLOPS: 0.54 +- 0.24
+hazelnut AUROC: 98.93 +- 0.15
+hazelnut partial AUROC: 97.90 +- 0.29
+hazelnut AP: 76.3 +- 1.9
+hazelnut wAP: 79.0 +- 0.8
+hazelnut GFLOPS: 0.39 +- 0.01
+metal_nut AUROC: 99.19 +- 0.14
+metal_nut partial AUROC: 98.43 +- 0.28
+metal_nut AP: 94.1 +- 1.6
+metal_nut wAP: 92.1 +- 0.6
+metal_nut GFLOPS: 0.46 +- 0.13
+pill AUROC: 97.96 +- 0.63
+pill partial AUROC: 96.10 +- 1.18
+pill AP: 74.0 +- 5.6
+pill wAP: 78.9 +- 1.4
+pill GFLOPS: 0.50 +- 0.33
+screw AUROC: 99.52 +- 0.08
+screw partial AUROC: 99.05 +- 0.16
+screw AP: 61.2 +- 2.5
+screw wAP: 59.6 +- 2.6
+screw GFLOPS: 0.41 +- 0.08
+toothbrush AUROC: 99.02 +- 0.14
+toothbrush partial AUROC: 98.07 +- 0.27
+toothbrush AP: 65.0 +- 2.4
+toothbrush wAP: 56.3 +- 3.6
+toothbrush GFLOPS: 0.30 +- 0.14
+256 256
+Global seed set to 1
+Global seed set to 1
+416 416
+Global seed set to 2
+Global seed set to 2
+64 64
+Global seed set to 0
+Global seed set to 0
+transistor AUROC: 98.12 +- 0.82
+transistor partial AUROC: 96.46 +- 1.39
+transistor AP: 73.4 +- 3.3
+transistor wAP: 71.1 +- 4.5
+transistor GFLOPS: 0.42 +- 0.17
+176 176
+Global seed set to 1
+Global seed set to 1
+128 128
+Global seed set to 2
+Global seed set to 2
+80 80
+zipper AUROC: 99.00 +- 0.14
+zipper partial AUROC: 98.12 +- 0.27
+zipper AP: 78.2 +- 2.6
+zipper wAP: 76.9 +- 3.6
+zipper GFLOPS: 0.54 +- 0.15
+Mean AUROC: 98.30 +- 0.32
+Mean partial AUROC: 96.95 +- 0.56
+Mean AP: 71.7 +- 3.1
+Mean wAP: 73.3 +- 3.2
+Mean GFLOPS: 0.41 +- 0.15

@@ -1,0 +1,80 @@
+carpet AUROC: 96.25 +- 0.31
+carpet partial AUROC: 93.88 +- 0.47
+carpet AP: 64.5 +- 0.7
+carpet wAP: 68.8 +- 1.1
+carpet GFLOPS: 0.34 +- 0.06
+grid AUROC: 99.06 +- 0.24
+grid partial AUROC: 98.18 +- 0.47
+grid AP: 63.7 +- 2.8
+grid wAP: 69.8 +- 4.4
+grid GFLOPS: 0.38 +- 0.18
+leather AUROC: 98.86 +- 0.29
+leather partial AUROC: 97.91 +- 0.49
+leather AP: 71.3 +- 0.7
+leather wAP: 78.3 +- 0.8
+leather GFLOPS: 0.24 +- 0.05
+tile AUROC: 98.54 +- 0.04
+tile partial AUROC: 97.52 +- 0.09
+tile AP: 88.8 +- 0.5
+tile wAP: 85.5 +- 1.0
+tile GFLOPS: 0.13 +- 0.00
+wood AUROC: 94.54 +- 0.98
+wood partial AUROC: 91.36 +- 1.33
+wood AP: 64.7 +- 2.3
+wood wAP: 75.6 +- 0.4
+wood GFLOPS: 0.27 +- 0.19
+bottle AUROC: 99.02 +- 0.19
+bottle partial AUROC: 98.08 +- 0.36
+bottle AP: 85.9 +- 2.1
+bottle wAP: 86.6 +- 1.7
+bottle GFLOPS: 0.43 +- 0.17
+cable AUROC: 98.74 +- 0.06
+cable partial AUROC: 97.56 +- 0.12
+cable AP: 78.0 +- 0.9
+cable wAP: 73.1 +- 0.6
+cable GFLOPS: 0.28 +- 0.06
+capsule AUROC: 98.76 +- 0.28
+capsule partial AUROC: 97.72 +- 0.38
+capsule AP: 60.1 +- 1.4
+capsule wAP: 74.0 +- 1.0
+capsule GFLOPS: 0.32 +- 0.21
+hazelnut AUROC: 99.32 +- 0.20
+hazelnut partial AUROC: 98.68 +- 0.39
+hazelnut AP: 84.3 +- 3.8
+hazelnut wAP: 83.9 +- 0.7
+hazelnut GFLOPS: 0.33 +- 0.07
+metal_nut AUROC: 99.23 +- 0.24
+metal_nut partial AUROC: 98.51 +- 0.46
+metal_nut AP: 95.8 +- 0.8
+metal_nut wAP: 93.0 +- 0.2
+metal_nut GFLOPS: 0.41 +- 0.07
+pill AUROC: 98.86 +- 0.11
+pill partial AUROC: 97.80 +- 0.20
+pill AP: 82.8 +- 1.4
+pill wAP: 81.3 +- 0.4
+pill GFLOPS: 0.59 +- 0.17
+screw AUROC: 99.60 +- 0.01
+screw partial AUROC: 99.22 +- 0.01
+screw AP: 66.0 +- 0.5
+screw wAP: 65.9 +- 0.4
+screw GFLOPS: 0.59 +- 0.30
+toothbrush AUROC: 98.81 +- 0.22
+toothbrush partial AUROC: 97.66 +- 0.44
+toothbrush AP: 62.2 +- 3.4
+toothbrush wAP: 60.3 +- 0.1
+toothbrush GFLOPS: 0.31 +- 0.16
+transistor AUROC: 98.57 +- 0.12
+transistor partial AUROC: 97.23 +- 0.23
+transistor AP: 79.5 +- 2.5
+transistor wAP: 75.5 +- 0.6
+transistor GFLOPS: 0.55 +- 0.23
+zipper AUROC: 98.93 +- 0.11
+zipper partial AUROC: 97.98 +- 0.21
+zipper AP: 77.6 +- 1.3
+zipper wAP: 77.5 +- 0.9
+zipper GFLOPS: 0.36 +- 0.08
+Mean AUROC: 98.47 +- 0.23
+Mean partial AUROC: 97.29 +- 0.38
+Mean AP: 75.0 +- 1.7
+Mean wAP: 76.6 +- 1.0
+Mean GFLOPS: 0.37 +- 0.13

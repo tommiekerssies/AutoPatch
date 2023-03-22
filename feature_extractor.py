@@ -1,5 +1,5 @@
 """
-The code in this file is borrowed from PatchCore (https://github.com/amazon-science/patchcore-inspection) (Apache-2.0 License)
+Some code in this file is borrowed from PatchCore (https://github.com/amazon-science/patchcore-inspection) (Apache-2.0 License)
 """
 
 

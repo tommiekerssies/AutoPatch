@@ -1,3 +1,7 @@
+"""
+Some code in this file is borrowed from PatchCore (https://github.com/amazon-science/patchcore-inspection) (Apache-2.0 License)
+"""
+
 import torch
 from tqdm import tqdm
 import numpy as np

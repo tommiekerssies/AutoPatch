@@ -17,15 +17,12 @@ def objective(
     datamodule,
     trainer_kwargs,
     img_size,
-    seed,
     fixed_supernet_name=None,
     fixed_kernel_size=None,
     fixed_expand_ratio=None,
     test_set_search=False,
     return_model=False,
 ):
-    seed_everything(seed, workers=True)
-
     supernet = ofa_net(
         trial.suggest_categorical(
             "supernet_name",
@@ -168,7 +165,6 @@ def main(args, trainer_kwargs):
             datamodule,
             trainer_kwargs,
             args.img_size,
-            args.seed,
             args.fixed_supernet_name,
             args.fixed_kernel_size,
             args.fixed_expand_ratio,

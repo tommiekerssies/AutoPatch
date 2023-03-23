@@ -86,13 +86,15 @@ def objective(
         as_string=False,
     )
 
-    trainer_kwargs |= dict(
-        num_sanity_val_steps=0,
-        logger=False,
-        deterministic="warn",
-        detect_anomaly=True,
-        max_epochs=1,
-        limit_val_batches=0 if test_set_search else None,
+    trainer_kwargs.update(
+        dict(
+            num_sanity_val_steps=0,
+            logger=False,
+            deterministic="warn",
+            detect_anomaly=True,
+            max_epochs=1,
+            limit_val_batches=0 if test_set_search else None,
+        )
     )
     trainer = Trainer(**trainer_kwargs)
 

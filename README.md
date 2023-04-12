@@ -3,8 +3,8 @@ I borrow some code from PatchCore (https://github.com/amazon-science/patchcore-i
 I borrow some code from TorchMetrics (https://github.com/Lightning-AI/metrics) (Apache-2.0 License)
 
 ## Installation and reproduction steps for main results
-1. Clone this repository 
-Anonymous.4open.science does not allow full download of repositories. You can use the following link to download the full repository at once: https://anon-github.automl.cc/r/AutoPatch
+1. Clone this repository  
+Anonymous.4open.science does not allow full download of repositories. You can use the following link to download the full repository at once: https://anon-github.automl.cc/r/AutoPatch  
 2. Install the required packages from requirements.txt
 3. Download and extract the MVTec dataset from: https://www.mvtec.com/company/research/datasets/mvtec-ad
 4. (Optional) Create your own database for Optuna to save the trials to (I recommend PostgreSQL for distributed searching)  

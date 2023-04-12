@@ -3,9 +3,10 @@ I borrow some code from PatchCore (https://github.com/amazon-science/patchcore-i
 I borrow some code from TorchMetrics (https://github.com/Lightning-AI/metrics) (Apache-2.0 License)
 
 ## Installation and reproduction steps for main results
-1. Clone this repository
+1. Clone this repository 
+Anonymous.4open.science does not allow full download of repositories. You can use the following link to download the full repository at once: https://anon-github.automl.cc/r/AutoPatch
 2. Install the required packages from requirements.txt
-3. Download and extract the MVTec dataset (https://www.mvtec.com/company/research/datasets/mvtec-ad)
+3. Download and extract the MVTec dataset from: https://www.mvtec.com/company/research/datasets/mvtec-ad
 4. (Optional) Create your own database for Optuna to save the trials to (I recommend PostgreSQL for distributed searching)  
 By default the included SQLite database file (./studies.db) is used with the best trials for the main experiments in the paper (I removed all non pareto optimal trials so loading is faster)
 5. (Optional) Run your own search with the following command by replacing the parameters $1-8:  
@@ -15,8 +16,8 @@ For example:
 7. Execute cell 1 of results.ipynb to load the Pareto optimal trials.
 8. Use cell 2 to generate the results for table 2 of the AutoPatch paper. Use k=1,2,4 with search_type="few" for the corresponding columns in the table, and k=4 with search_type="full" for AutoPatch (Test') column in the paper.  
 You need to put the right dataset directory and gpu in cell 2 of results.ipynb and the code will run the evaluation for all highest performance trials (which means training and testing the models, which should take approximately 15 minutes for one column of table 2 of the AutoPatch paper)  
-Alternatively, one can take the raw output from the second cell of results.ipynb from resultsk1.txt, resultsk2.txt, resultsk4.txt and resultsk4test.txt for the results in table 2 of the AutoPatch paper.
+Alternatively, you can take the raw output from the second cell of results.ipynb from resultsk1.txt, resultsk2.txt, resultsk4.txt and resultsk4test.txt for the results in table 2 of the AutoPatch paper.
 9. Use cell 3 to generate figure 2 of the AutoPatch paper. This code does not need to rerun evaluation and should execute relatively quickly.  
-Alternatively, one can take figure2.png for the raw output of this cell.
-9. Use our forked repository of PatchCore (https://anon-github.automl.cc/r/patchcore-fork) to generate the PatchCore baseline results in table 2 of the AutoPatch paper.  
-Alternatively, one can take the raw output from the provided command in the README in the fork from results.txt in the fork.
+Alternatively, you can take figure2.png for the raw output of this cell.
+9. Use our forked repository of PatchCore to generate the PatchCore baseline results in table 2 of the AutoPatch paper: https://anon-github.automl.cc/r/patchcore-fork
+Alternatively, you can take the raw output from the provided command in the README in the fork from results.txt in the fork.

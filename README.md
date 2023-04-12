@@ -19,5 +19,5 @@ You need to put the right dataset directory and gpu in cell 2 of results.ipynb a
 Alternatively, you can take the raw output from the second cell of results.ipynb from resultsk1.txt, resultsk2.txt, resultsk4.txt and resultsk4test.txt for the results in table 2 of the AutoPatch paper.
 9. Use cell 3 to generate figure 2 of the AutoPatch paper. This code does not need to rerun evaluation and should execute relatively quickly.  
 Alternatively, you can take figure2.png for the raw output of this cell.
-9. Use our forked repository of PatchCore to generate the PatchCore baseline results in table 2 of the AutoPatch paper: https://anon-github.automl.cc/r/patchcore-fork
+9. Use our forked repository of PatchCore to generate the PatchCore baseline results in table 2 of the AutoPatch paper: https://anon-github.automl.cc/r/patchcore-fork  
 Alternatively, you can take the raw output from the provided command in the README in the fork from results.txt in the fork.

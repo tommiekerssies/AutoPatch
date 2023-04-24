@@ -5,7 +5,7 @@ I borrow some code from TorchMetrics (https://github.com/Lightning-AI/metrics) (
 ## Installation and reproduction steps for main results
 1. Clone this repository  
 Anonymous.4open.science does not allow full download of repositories. You can use the following link to download the full repository at once: https://anon-github.automl.cc/r/AutoPatch  
-2. Install the required packages from requirements.txt
+2. Install Python 3.10 (3.11 does not work!) and the required packages from requirements.txt
 3. Download and extract the MVTec dataset from: https://www.mvtec.com/company/research/datasets/mvtec-ad
 4. (Optional) Create your own database for Optuna to save the trials to (I recommend PostgreSQL for distributed searching)  
 By default the included SQLite database file (./studies.db) is used with the best trials for the main experiments in the paper (I removed all non pareto optimal trials so loading is faster)

@@ -14,10 +14,10 @@ By default the included SQLite database file (./studies.db) is used with the bes
 For example:  
 ```python search.py --accelerator auto --study_name 2023_03_11_13_00_00_n2000_k1_s0_carpet_False --n_trials 2000 --k 1 --seed 0 --category carpet --test_set_search False --dataset_dir "../MVTec" --db_url sqlite:///studies.db```
 7. Execute cell 1 of results.ipynb to load the Pareto optimal trials.
-8. Use cell 2 to generate the results for table 2 of the AutoPatch paper. Use k=1,2,4 with search_type="few" for the corresponding columns in the table, and k=4 with search_type="full" for AutoPatch (Test') column in the paper.  
-You need to put the right dataset directory and gpu in cell 2 of results.ipynb and the code will run the evaluation for all highest performance trials (which means training and testing the models, which should take approximately 15 minutes for one column of table 2 of the AutoPatch paper)  
-Alternatively, you can take the raw output from the second cell of results.ipynb from resultsk1.txt, resultsk2.txt, resultsk4.txt and resultsk4test.txt for the results in table 2 of the AutoPatch paper.
-9. Use cell 3 to generate figure 2 of the AutoPatch paper. This code does not need to rerun evaluation and should execute relatively quickly.  
+8. Use cell 2 to generate the results for the highest performance architectures. Use k=1,2,4 with search_type="few" for the corresponding columns in the table in the paper, and k=4 with search_type="full" for AutoPatch (Test') column in the paper.  
+You need to put the right dataset directory and gpu in cell 2 of results.ipynb and the code will run the evaluation for all highest performance trials (which means training and testing the models, which should take approximately 15 minutes for one column of the corresponding table in the AutoPatch paper)  
+Alternatively, you can take the raw output from the second cell of results.ipynb from resultsk1.txt, resultsk2.txt, resultsk4.txt and resultsk4test.txt for the results in the AutoPatch paper.
+9. Use cell 3 to generate the Full Pareto-front figure in the AutoPatch paper. This code does not need to rerun evaluation and should execute relatively quickly.  
 Alternatively, you can take figure2.png for the raw output of this cell.
-9. Use our forked repository of PatchCore to generate the PatchCore baseline results in table 2 of the AutoPatch paper: https://anon-github.automl.cc/r/patchcore-fork  
+9. Use our forked repository of PatchCore to generate the PatchCore baseline results in the AutoPatch paper: https://anon-github.automl.cc/r/patchcore-fork  
 Alternatively, you can take the raw output from the provided command in the README in the fork from results.txt in the fork.
